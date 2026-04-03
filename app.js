@@ -71,6 +71,8 @@ function defaultLiability() {
     category: 'Mortgage',
     annualInterestRate: 6,
     useAmortization: false, monthlyPayment: 0,
+    includeInLiquidNW: true,
+    paymentAssetName: '',
   };
 }
 
@@ -83,6 +85,7 @@ function defaultEvent() {
     isRecurring: true,
     startDate: today(), endDate: '',
     inflationAdjusted: false, notes: '',
+    linkedAssetName: '',
   };
 }
 
@@ -269,7 +272,17 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
   const liabilities = deepClone(baseline.liabilities ?? []);
   let cashFlow = 0; // accumulated net cash since baseline date
 
+  // Build name→asset map for event/liability linking (references same objects as assets array)
+  const assetMap = new Map(assets.map(a => [a.name, a]));
+
   return months.map(month => {
+    // Capture net worth at start of month (before any updates)
+    const startNetWorth = assets.reduce((s, a) => s + a.value, 0) + cashFlow
+                        - liabilities.reduce((s, l) => s + l.value, 0);
+
+    let incomeThisMonth  = 0;
+    let expenseThisMonth = 0;
+
     // 1. Grow assets
     for (const a of assets) {
       if (a.isInvestment) {
@@ -280,14 +293,20 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
       }
     }
 
-    // 2. Amortise liabilities and deduct payments from cash
+    // 2. Amortise liabilities and deduct payments from cash (or from a linked asset)
     for (const l of liabilities) {
       if (l.useAmortization && l.value > 0) {
         const mRate = (l.annualInterestRate ?? 0) / 12 / 100;
         const interest = l.value * mRate;
         const payment = Math.min(l.monthlyPayment ?? 0, l.value + interest);
         l.value = Math.max(0, l.value - (payment - interest));
-        cashFlow -= payment;
+        const payAsset = l.paymentAssetName ? assetMap.get(l.paymentAssetName) : null;
+        if (payAsset) {
+          payAsset.value = Math.max(0, payAsset.value - payment);
+        } else {
+          cashFlow -= payment;
+        }
+        expenseThisMonth += payment;
       }
     }
 
@@ -304,21 +323,49 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
       }
 
       switch (ev.type) {
-        case 'income':          cashFlow += amount * (1 - (config.taxRate ?? 0) / 100); break;
-        case 'expense':         cashFlow -= amount; break;
-        case 'one_time_inflow': cashFlow += amount; break;
-        case 'one_time_outflow':cashFlow -= amount; break;
+        case 'income': {
+          const net = amount * (1 - (config.taxRate ?? 0) / 100);
+          cashFlow += net;
+          incomeThisMonth += net;
+          break;
+        }
+        case 'expense': {
+          cashFlow -= amount;
+          expenseThisMonth += amount;
+          // Transfer to linked asset (e.g. savings deposit): NW-neutral
+          if (ev.linkedAssetName) {
+            const linked = assetMap.get(ev.linkedAssetName);
+            if (linked) linked.value += amount;
+          }
+          break;
+        }
+        case 'one_time_inflow': {
+          cashFlow += amount;
+          incomeThisMonth += amount;
+          break;
+        }
+        case 'one_time_outflow': {
+          cashFlow -= amount;
+          expenseThisMonth += amount;
+          if (ev.linkedAssetName) {
+            const linked = assetMap.get(ev.linkedAssetName);
+            if (linked) linked.value += amount;
+          }
+          break;
+        }
       }
     }
 
     // 4. Net worth = assets + cashFlow − liabilities
-    const assetTotal    = assets.reduce((s, a) => s + a.value, 0);
-    const liabTotal     = liabilities.reduce((s, l) => s + l.value, 0);
-    const liquidTotal   = assets.filter(a => a.isLiquid).reduce((s, a) => s + a.value, 0);
-    const netWorth      = assetTotal + cashFlow - liabTotal;
-    const liquidNetWorth= liquidTotal + cashFlow - liabTotal;
+    const assetTotal      = assets.reduce((s, a) => s + a.value, 0);
+    const liabTotal       = liabilities.reduce((s, l) => s + l.value, 0);
+    const liquidTotal     = assets.filter(a => a.isLiquid).reduce((s, a) => s + a.value, 0);
+    const liquidLiabTotal = liabilities.filter(l => l.includeInLiquidNW ?? true).reduce((s, l) => s + l.value, 0);
+    const netWorth        = assetTotal + cashFlow - liabTotal;
+    const liquidNetWorth  = liquidTotal + cashFlow - liquidLiabTotal;
 
-    return { month, netWorth, liquidNetWorth, assetTotal, liabTotal, cashFlow };
+    return { month, netWorth, liquidNetWorth, assetTotal, liabTotal, cashFlow,
+             startNetWorth, incomeThisMonth, expenseThisMonth };
   });
 }
 
@@ -354,10 +401,28 @@ function runMonteCarloForecast(baselineId, config, mcConfig) {
   });
 }
 
-// Collapse monthly results to one row per year (last month of each year)
+// Collapse monthly results to one row per year.
+// Balance-sheet fields: last month of year wins.
+// Flow fields (income, expenses): summed across all months in the year.
+// startNetWorth: first month of year's value.
 function aggregateYearly(monthly) {
   const map = {};
-  for (const r of monthly) map[r.month.slice(0, 4)] = r;
+  for (const r of monthly) {
+    const yr = r.month.slice(0, 4);
+    if (!map[yr]) {
+      map[yr] = { ...r, incomeThisMonth: 0, expenseThisMonth: 0 };
+      // startNetWorth stays as the first month's value (set once here)
+    }
+    map[yr].incomeThisMonth  += r.incomeThisMonth  ?? 0;
+    map[yr].expenseThisMonth += r.expenseThisMonth ?? 0;
+    // Overwrite balance-sheet fields with the latest month's values
+    map[yr].month        = r.month;
+    map[yr].netWorth     = r.netWorth;
+    map[yr].liquidNetWorth = r.liquidNetWorth;
+    map[yr].assetTotal   = r.assetTotal;
+    map[yr].liabTotal    = r.liabTotal;
+    map[yr].cashFlow     = r.cashFlow;
+  }
   return Object.values(map);
 }
 
@@ -420,6 +485,41 @@ function showConfirm(title, msg, onConfirm, confirmLabel = 'Delete') {
 
 function hideModal() {
   document.getElementById('modal-overlay').classList.remove('open');
+  document.getElementById('modal').classList.remove('modal-wide');
+}
+
+function showHelpModal(tab = 'readme') {
+  const readmeMd = document.getElementById('doc-readme')?.textContent ?? 'Documentation not found.';
+  const claudeMd = document.getElementById('doc-claude')?.textContent ?? 'Documentation not found.';
+  const render = md => typeof marked !== 'undefined'
+    ? marked.parse(md)
+    : `<pre style="white-space:pre-wrap;font-size:12.5px;">${esc(md)}</pre>`;
+
+  document.getElementById('modal').innerHTML = `
+    <div class="modal-header">
+      <span class="modal-title">Help &amp; Documentation</span>
+      <button class="modal-close" onclick="hideModal()">×</button>
+    </div>
+    <div class="help-tabs">
+      <button class="help-tab-btn${tab === 'readme' ? ' active' : ''}" onclick="switchHelpTab('readme')">User Guide</button>
+      <button class="help-tab-btn${tab === 'claude' ? ' active' : ''}" onclick="switchHelpTab('claude')">Developer Guide</button>
+    </div>
+    <div class="help-content" id="help-readme" ${tab !== 'readme' ? 'style="display:none"' : ''}>
+      ${render(readmeMd)}
+    </div>
+    <div class="help-content" id="help-claude" ${tab !== 'claude' ? 'style="display:none"' : ''}>
+      ${render(claudeMd)}
+    </div>`;
+  document.getElementById('modal').classList.add('modal-wide');
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function switchHelpTab(tab) {
+  document.getElementById('help-readme').style.display = tab === 'readme' ? '' : 'none';
+  document.getElementById('help-claude').style.display = tab === 'claude' ? '' : 'none';
+  document.querySelectorAll('.help-tab-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', (i === 0 && tab === 'readme') || (i === 1 && tab === 'claude'));
+  });
 }
 
 document.addEventListener('click', e => {
@@ -772,7 +872,8 @@ function renderBaselineDetail() {
         <div class="table-wrap"><table>
           <thead><tr>
             <th>Name</th><th>Category</th><th>Rate</th>
-            <th>Monthly Payment</th><th>Amortising</th>
+            <th>Monthly Payment</th><th>Payment From</th><th>Amortising</th>
+            <th>Liquid NW</th>
             <th class="text-right">Balance</th><th></th>
           </tr></thead>
           <tbody>
@@ -781,7 +882,9 @@ function renderBaselineDetail() {
               <td class="text-muted">${esc(l.category)}</td>
               <td class="font-mono" style="font-size:12px;">${fmtPct(l.annualInterestRate)}/yr</td>
               <td>${l.useAmortization ? fmt$(l.monthlyPayment) : '<span class="text-muted">—</span>'}</td>
+              <td class="text-muted" style="font-size:12px;">${l.useAmortization && l.paymentAssetName ? esc(l.paymentAssetName) : '<span class="text-muted">—</span>'}</td>
               <td>${l.useAmortization ? '✓' : '<span class="text-muted">—</span>'}</td>
+              <td>${(l.includeInLiquidNW ?? true) ? '✓' : '<span class="text-muted">—</span>'}</td>
               <td class="text-right text-negative">${fmt$(l.value)}</td>
               <td>
                 <div class="flex gap-2 justify-end">
@@ -792,7 +895,7 @@ function renderBaselineDetail() {
             </tr>`).join('')}
           </tbody>
           <tfoot><tr>
-            <td colspan="5"><strong>Total Liabilities</strong></td>
+            <td colspan="7"><strong>Total Liabilities</strong></td>
             <td class="text-right text-negative"><strong>${fmt$(totalL)}</strong></td>
             <td></td>
           </tr></tfoot>
@@ -903,6 +1006,10 @@ function openLiabilityModal(baselineId, liabilityId = null) {
   const existing = liabilityId ? (bl.liabilities ?? []).find(l => l.id === liabilityId) : null;
   const l = existing ?? defaultLiability();
 
+  const blAssetNames = (bl.assets ?? []).map(a => a.name).filter(Boolean);
+  const payAssetOptions = `<option value="">— Cash Flow (default) —</option>`
+    + blAssetNames.map(n => `<option${(l.paymentAssetName ?? '') === n ? ' selected' : ''}>${esc(n)}</option>`).join('');
+
   showModal(existing ? 'Edit Liability' : 'Add Liability', `
     <div class="form-row">
       <div class="form-group">
@@ -926,6 +1033,13 @@ function openLiabilityModal(baselineId, liabilityId = null) {
     </div>
     <div class="form-group">
       <label class="checkbox-label">
+        <input type="checkbox" id="l-liquid-nw" ${(l.includeInLiquidNW ?? true) ? 'checked' : ''}>
+        Include in Liquid Net Worth
+      </label>
+      <div class="form-hint">Uncheck for liabilities tied to illiquid assets (e.g., mortgage against real estate you wouldn't sell).</div>
+    </div>
+    <div class="form-group">
+      <label class="checkbox-label">
         <input type="checkbox" id="l-amort" ${l.useAmortization ? 'checked' : ''} onchange="toggleAmortFields()">
         Amortising loan — automatic principal + interest calculation
       </label>
@@ -936,6 +1050,11 @@ function openLiabilityModal(baselineId, liabilityId = null) {
         <label>Monthly Payment ($)</label>
         <input type="number" id="l-pay" value="${l.monthlyPayment}" step="10" min="0">
         <div class="form-hint">The full payment amount — automatically split into principal and interest each month.</div>
+      </div>
+      <div class="form-group">
+        <label>Payment Source Asset <span class="label-note">(optional)</span></label>
+        <select id="l-pay-asset">${payAssetOptions}</select>
+        <div class="form-hint">Payment is deducted from this asset's balance instead of the general cash flow pool (e.g., mortgage paid from checking account).</div>
       </div>
     </div>
   `, () => {
@@ -948,8 +1067,10 @@ function openLiabilityModal(baselineId, liabilityId = null) {
       category: document.getElementById('l-cat').value,
       value: parseFloat(document.getElementById('l-value').value) || 0,
       annualInterestRate: parseFloat(document.getElementById('l-rate').value) || 0,
+      includeInLiquidNW: document.getElementById('l-liquid-nw').checked,
       useAmortization: document.getElementById('l-amort').checked,
       monthlyPayment: parseFloat(document.getElementById('l-pay').value) || 0,
+      paymentAssetName: document.getElementById('l-pay-asset').value,
     };
 
     if (!bl.liabilities) bl.liabilities = [];
@@ -1031,7 +1152,7 @@ function renderEvents() {
             <th>Name</th><th>Type</th><th>Category</th>
             <th class="text-right">Amount</th>
             <th>Frequency</th><th>Period</th>
-            <th>Inflation</th><th></th>
+            <th>Inflation</th><th>Transfer To</th><th></th>
           </tr></thead>
           <tbody>
             ${filtered.map(ev => `<tr>
@@ -1050,6 +1171,7 @@ function renderEvents() {
                 ${monthLabel(ev.startDate)}${ev.isRecurring && ev.endDate ? ` – ${monthLabel(ev.endDate)}` : ev.isRecurring ? ' onwards' : ''}
               </td>
               <td>${ev.inflationAdjusted ? '✓' : '<span class="text-muted">—</span>'}</td>
+              <td class="text-muted" style="font-size:12px;">${ev.linkedAssetName ? esc(ev.linkedAssetName) : '<span class="text-muted">—</span>'}</td>
               <td>
                 <div class="flex gap-2 justify-end">
                   <button class="btn btn-sm btn-ghost" onclick="openEventModal('${ev.id}')">Edit</button>
@@ -1067,6 +1189,12 @@ function renderEvents() {
 function openEventModal(id = null) {
   const existing = id ? state.data.events.find(e => e.id === id) : null;
   const ev = existing ?? defaultEvent();
+
+  const allAssetNames = [...new Set(
+    state.data.baselines.flatMap(bl => (bl.assets ?? []).map(a => a.name).filter(Boolean))
+  )].sort();
+  const linkedAssetOptions = `<option value="">— None —</option>`
+    + allAssetNames.map(n => `<option${(ev.linkedAssetName ?? '') === n ? ' selected' : ''}>${esc(n)}</option>`).join('');
 
   showModal(existing ? 'Edit Event' : 'Add Event', `
     <div class="form-row">
@@ -1134,17 +1262,25 @@ function openEventModal(id = null) {
       <label>Notes <span class="label-note">(optional)</span></label>
       <input type="text" id="ev-notes" value="${esc(ev.notes ?? '')}" placeholder="Any additional context">
     </div>
+    <div class="form-group" id="ev-link-wrap" ${(ev.type === 'income' || ev.type === 'one_time_inflow') ? 'style="display:none"' : ''}>
+      <label>Transfer to Asset <span class="label-note">(expense / outflow only)</span></label>
+      <select id="ev-link-asset">${linkedAssetOptions}</select>
+      <div class="form-hint">When set, the outflow also adds the same amount to this asset (e.g., $1,000 savings deposit into Investments). Net worth change = $0.</div>
+    </div>
   `, () => {
     const name = document.getElementById('ev-name').value.trim();
     if (!name) { showToast('Name is required', 'error'); return false; }
     const startDate = document.getElementById('ev-start').value;
     if (!startDate) { showToast('Date is required', 'error'); return false; }
 
+    const type = document.getElementById('ev-type').value;
+    const isOutflow = type === 'expense' || type === 'one_time_outflow';
+
     const updated = {
       id: existing?.id ?? uuid(),
       name,
       category: document.getElementById('ev-cat').value,
-      type: document.getElementById('ev-type').value,
+      type,
       amount: parseFloat(document.getElementById('ev-amt').value) || 0,
       stdDevAmount: parseFloat(document.getElementById('ev-std').value) || 0,
       isRecurring: document.getElementById('ev-rec').checked,
@@ -1152,6 +1288,7 @@ function openEventModal(id = null) {
       endDate: document.getElementById('ev-end').value || '',
       inflationAdjusted: document.getElementById('ev-inf').checked,
       notes: document.getElementById('ev-notes').value.trim(),
+      linkedAssetName: isOutflow ? document.getElementById('ev-link-asset').value : '',
     };
 
     if (existing) {
@@ -1169,7 +1306,9 @@ function openEventModal(id = null) {
 function onEvTypeChange() {
   const type = document.getElementById('ev-type').value;
   const oneTime = type === 'one_time_inflow' || type === 'one_time_outflow';
+  const isOutflow = type === 'expense' || type === 'one_time_outflow';
   document.getElementById('ev-tax-note').style.display = type === 'income' ? '' : 'none';
+  document.getElementById('ev-link-wrap').style.display = isOutflow ? '' : 'none';
   if (oneTime) {
     document.getElementById('ev-rec').checked = false;
     document.getElementById('ev-rec').disabled = true;
@@ -1527,7 +1666,11 @@ function renderResults() {
         <table>
           <thead><tr>
             <th>${vm === 'yearly' ? 'Year' : 'Month'}</th>
-            <th class="text-right">Net Worth</th>
+            <th class="text-right">Start NW</th>
+            <th class="text-right">+ Income</th>
+            <th class="text-right">− Expenses</th>
+            <th class="text-right">Δ NW</th>
+            <th class="text-right">End NW</th>
             <th class="text-right">Liquid NW</th>
             <th class="text-right">Assets</th>
             <th class="text-right">Liabilities</th>
@@ -1536,8 +1679,14 @@ function renderResults() {
             ${mc  ? '<th class="text-right">P10</th><th class="text-right">P50</th><th class="text-right">P90</th>' : ''}
           </tr></thead>
           <tbody>
-            ${det.map((r, i) => `<tr>
+            ${det.map((r, i) => {
+              const delta = r.netWorth - (r.startNetWorth ?? r.netWorth);
+              return `<tr>
               <td class="nowrap">${vm === 'yearly' ? r.month : monthLabel(r.month)}</td>
+              <td class="text-right font-mono text-muted">${fmt$(r.startNetWorth ?? 0)}</td>
+              <td class="text-right font-mono text-positive">${fmt$(r.incomeThisMonth ?? 0)}</td>
+              <td class="text-right font-mono text-negative">${fmt$(r.expenseThisMonth ?? 0)}</td>
+              <td class="text-right font-mono ${delta >= 0 ? 'text-positive' : 'text-negative'}">${delta >= 0 ? '+' : ''}${fmt$(delta)}</td>
               <td class="text-right font-mono ${r.netWorth >= 0 ? 'text-positive' : 'text-negative'}">${fmt$(r.netWorth)}</td>
               <td class="text-right font-mono">${fmt$(r.liquidNetWorth)}</td>
               <td class="text-right font-mono">${fmt$(r.assetTotal)}</td>
@@ -1549,7 +1698,7 @@ function renderResults() {
                 <td class="text-right font-mono">${fmt$(mc[i]?.p50)}</td>
                 <td class="text-right font-mono">${fmt$(mc[i]?.p90)}</td>
               ` : ''}
-            </tr>`).join('')}
+            </tr>`;}).join('')}
           </tbody>
         </table>
       </div>
@@ -1692,13 +1841,18 @@ function exportCSV() {
   const cmp = run.cmpResults ? (vm === 'yearly' ? aggregateYearly(run.cmpResults) : run.cmpResults) : null;
   const mc  = run.mcResults  ? (vm === 'yearly' ? aggregateMCYearly(run.mcResults) : run.mcResults) : null;
 
-  const headers = ['Period','Net Worth','Liquid Net Worth','Assets','Liabilities','Cum Cash Flow'];
+  const headers = ['Period','Start NW','+ Income','- Expenses','Delta NW','End NW','Liquid Net Worth','Assets','Liabilities','Cum Cash Flow'];
   if (cmp) headers.push('Compare Net Worth');
   if (mc)  headers.push('P10','P25','P50','P75','P90');
 
   const rows = det.map((r, i) => {
+    const delta = r.netWorth - (r.startNetWorth ?? r.netWorth);
     const row = [
       vm === 'yearly' ? r.month : monthLabel(r.month),
+      (r.startNetWorth ?? 0).toFixed(2),
+      (r.incomeThisMonth ?? 0).toFixed(2),
+      (r.expenseThisMonth ?? 0).toFixed(2),
+      delta.toFixed(2),
       r.netWorth.toFixed(2), r.liquidNetWorth.toFixed(2),
       r.assetTotal.toFixed(2), r.liabTotal.toFixed(2), r.cashFlow.toFixed(2),
     ];
@@ -1811,7 +1965,10 @@ function buildSidebar() {
   const activeNav = SIDEBAR_MAP[state.page] ?? state.page;
 
   document.getElementById('sidebar').innerHTML = `
-    <div class="sidebar-logo">Fin<span>Tom</span></div>
+    <div class="sidebar-logo">
+      <span>Fin<span class="logo-dim">Tom</span></span>
+      <button class="help-btn" onclick="showHelpModal()" title="Help &amp; Documentation">?</button>
+    </div>
     <nav class="sidebar-nav">
       ${nav.map(({ page, icon, label }) => `
         <a class="nav-item${activeNav === page ? ' active' : ''}" data-page="${page}" onclick="navigate('${page}')">

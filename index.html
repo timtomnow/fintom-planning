@@ -6,6 +6,7 @@
   <title>FinTom</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
   <div id="app">
@@ -15,5 +16,464 @@
   <div id="modal-overlay"><div id="modal"></div></div>
   <div id="toast-container"></div>
   <script src="app.js"></script>
+
+  <!-- ═══════════════════════════════════════════════════════
+       Documentation content — read by showHelpModal() in app.js
+       Content is raw Markdown; script type prevents execution.
+       Do not include the literal string </script inside these blocks.
+       ══════════════════════════════════════════════════════��� -->
+
+  <script type="text/x-markdown" id="doc-readme">
+# FinTom — Household Financial Planning
+
+## How to Run
+
+1. Open `index.html` in any modern web browser (Chrome, Firefox, Safari, Edge)
+2. An internet connection is required (Chart.js and help rendering are loaded from CDN)
+3. No installation, coding environment, or build step needed
+
+---
+
+## Data Storage
+
+Your data is saved automatically in the browser's **local storage** after every change. If you clear browser data, your FinTom data will be lost.
+
+**Back up regularly:**
+- Go to **Settings → Export All Data (JSON)** and save the file somewhere safe
+- To restore: **Settings → Import Data (JSON)**
+- To move to another device: export on the old device → copy the `.json` file → import on the new device
+
+---
+
+## Features
+
+### Baselines
+
+A baseline is a snapshot of your net worth at a specific date. It contains a list of assets and liabilities. You can create multiple baselines, duplicate them, and use any one as the starting point for an analysis run.
+
+**Tip:** Duplicate your current baseline to model "what if" scenarios — e.g., selling a house, changing jobs, paying off a loan early.
+
+---
+
+### Assets
+
+Each asset has a name, category, and current value, plus a growth model:
+
+| Mode | When to use | Parameters |
+|---|---|---|
+| **Non-investment** | Home, car, savings account | Monthly growth rate % (e.g. 0.33% ≈ 4%/yr) |
+| **Investment** | Brokerage, 401k, IRA | Annual mean return % + annual std deviation % |
+
+- Mark assets as **Liquid** if they can be sold or spent quickly. Liquid assets feed into the *Liquid Net Worth* calculation.
+- Investment mode enables Monte Carlo — each simulation samples the monthly return from a normal distribution defined by mean and std deviation.
+
+---
+
+### Liabilities
+
+Each liability has a name, category, current balance, and annual interest rate.
+
+**Amortisation (for mortgages and instalment loans):**
+- Enable the **Amortising loan** toggle and enter the full monthly payment
+- Each month the engine automatically splits the payment into principal and interest, reduces the balance, and deducts the payment from cash flow (or from a Payment Source Asset — see below)
+- **Do NOT** also create an expense event for the same payment — that double-counts it
+
+**Include in Liquid NW:**
+- Checked by default. Uncheck for liabilities tied to illiquid assets (e.g., a mortgage on a home you wouldn't liquidate to pay it off). Unchecked liabilities are excluded from the Liquid Net Worth calculation.
+
+**Payment Source Asset** *(amortising loans only — optional):*
+- Select which asset account the monthly payment comes from (e.g., your mortgage is paid from your Checking Account)
+- When set, the payment deducts from that asset's balance each month instead of the general cash flow pool
+- Net worth effect is identical either way — this controls how individual account balances track
+
+---
+
+### Events
+
+Events are **global** — they apply to every analysis run regardless of which baseline is selected. They model all recurring and one-time cash flows.
+
+| Type | Description |
+|---|---|
+| **Income** | Taxable inflows (salary, rental income, consulting). The analysis tax rate is applied. |
+| **Expense** | Recurring costs (groceries, utilities, subscriptions). |
+| **One-time Inflow** | Single cash inflow (inheritance, asset sale, bonus). |
+| **One-time Outflow** | Single cash outflow (car purchase, home renovation, large expense). |
+
+**Options:**
+- **Recurring** — runs every month between start and end date (leave end blank for indefinite)
+- **Adjust for inflation** — amount grows at the configured inflation rate each month
+- **Std Dev ($)** — add variability for Monte Carlo (e.g., a bonus that might be $5k–$15k)
+
+**Transfer to Asset** *(expense / outflow only — optional):*
+- Links the outflow to a specific asset. The cash flow decreases by the amount AND the named asset's value increases by the same amount.
+- **Net worth change = $0** — this is a transfer, not a real expense (you're moving money from cash into an asset)
+- **Example:** A $1,000/month savings deposit into your Investment account. Without this link, the $1,000 reduces net worth. With the link, cash decreases by $1,000 and the investment increases by $1,000 — net worth is unchanged, which correctly models a savings contribution.
+- The asset name must match an asset in the baseline being analysed (matched by name)
+
+---
+
+### Analysis Configurations
+
+Each configuration stores the settings for one forecast run:
+
+| Setting | Description |
+|---|---|
+| **Primary Baseline** | Starting point for the forecast |
+| **Compare Baseline** | Optional second baseline shown as a second line on the chart |
+| **Period** | Start and end month for the forecast |
+| **Inflation Rate** | Annual % — grows inflation-adjusted event amounts |
+| **Tax Rate** | Household effective rate — applied to all income events |
+| **Monte Carlo** | Enables probability simulation (see below) |
+| **Standard of Living** | Monthly spending target for the 4% SWR sustainability line |
+
+**Monte Carlo simulation:**
+- Runs N simulations, each sampling investment returns from Normal(mean, stddev) for each investment asset
+- Also samples variable event amounts if a Std Dev is set on the event
+- Displays 10th / 25th / 50th / 75th / 90th percentile bands on the chart
+- 500–1000 simulations is a good balance of accuracy and speed
+
+---
+
+### Results
+
+Toggle between **Monthly** and **Yearly** view. Export the full table to **CSV**.
+
+**Charts:**
+- **Net Worth Over Time** — single line (deterministic), or percentile bands (Monte Carlo). Compare baseline shown in green. Sustainability target shown in orange.
+- **Cumulative Cash Flow** — net cash accumulated from all events since the forecast start
+
+**Detail table columns:**
+
+| Column | Description |
+|---|---|
+| Start NW | Net worth at the start of the period (before growth, payments, events) |
+| + Income | After-tax income and one-time inflows received during the period |
+| − Expenses | Expenses, one-time outflows, and loan payments during the period |
+| Δ NW | Change in net worth — includes asset appreciation, not just cash flows |
+| End NW | Net worth at the end of the period |
+| Liquid NW | End NW using only liquid assets and selected liabilities |
+| Assets | Total asset value at end of period |
+| Liabilities | Total liability balance at end of period |
+| Cum. Cash Flow | Accumulated net cash since forecast start |
+
+> **Note on Δ NW vs Income/Expenses:** Income − Expenses ≠ Δ NW. The difference is asset appreciation (investment growth, property appreciation) which increases net worth without appearing in the cash flow columns.
+
+---
+
+## How the Forecast Works
+
+Each month the engine:
+
+1. **Grows each asset** — non-investment: `value × (1 + monthlyRate/100)` — investment: `value × (1 + annualReturn/12/100)` where the return is the mean (deterministic) or a sampled value (Monte Carlo)
+2. **Amortises liabilities** — for each amortising loan, splits the payment into principal and interest, reduces the balance, and deducts the payment from the payment source asset (or cash flow if none set)
+3. **Applies events** — income after tax adds to cash flow; expenses and outflows subtract; outflows with a Transfer Asset also add the amount to that asset's value
+4. **Computes net worth** — `Total Assets + Cumulative Cash Flow − Total Liabilities`
+
+**Liquid Net Worth** uses only liquid assets and only liabilities with "Include in Liquid NW" enabled.
+
+**Sustainability target** uses the 4% safe withdrawal rule: if your net worth exceeds `monthly spend × 12 × 25`, your investments could theoretically sustain that spending indefinitely from returns alone.
+
+---
+
+## Tips
+
+- For a mortgage: add it as a **liability with amortisation**. Do not add a separate expense event for the payment.
+- Set the **Payment Source Asset** on your mortgage to track your checking account balance accurately.
+- For savings contributions: use **Transfer to Asset** on an expense event so your investment account grows from deposits while net worth stays unchanged (it's just moving money).
+- For variable income (bonuses, freelance): add a **Std Dev** to the event so Monte Carlo reflects the uncertainty.
+- Run Monte Carlo with **500+ simulations** for reliable percentile bands.
+- Use the **sustainability target line** to see when your portfolio could sustain your lifestyle indefinitely.
+- **Duplicate a baseline** to model scenarios side-by-side — compare them using the "Compare Baseline" setting in an analysis configuration.
+  </script>
+
+  <script type="text/x-markdown" id="doc-claude">
+# FinTom — Codebase Guide for Claude
+
+This is a self-contained, single-page financial planning app. No framework, no build step, no npm. Five files: `index.html`, `styles.css`, `app.js`, `README.md`, `README.txt`. Runs by opening `index.html` in any browser. Chart.js and marked.js loaded from CDN (internet required). Data persisted to `localStorage`.
+
+---
+
+## File Map
+
+| File | Purpose |
+|---|---|
+| `index.html` | Shell. Loads Chart.js CDN, marked.js CDN, `styles.css`, `app.js`. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. Also embeds doc content in `script[type="text/x-markdown"]` tags for the in-app help modal. |
+| `styles.css` | Full design system. CSS variables in `:root`. No external dependencies. |
+| `app.js` | Everything else — state, data, forecast engine, Monte Carlo, all page renders, charts, modals, routing, help modal. |
+| `README.md` | End-user instructions (Markdown). |
+
+---
+
+## Architecture
+
+Single-page app with manual routing. No framework. Pages are rendered by functions that return HTML strings assigned to `document.getElementById('main').innerHTML`. Charts are Chart.js instances created after render and destroyed on navigation.
+
+### State
+
+```js
+const state = {
+  data: null,           // all persisted data, mirrors localStorage
+  page: 'dashboard',
+  params: {},           // current page params (e.g. { id: 'baseline-id' })
+  activeCharts: [],     // Chart.js instances; destroyed on each navigate()
+  lastRun: null,        // { detResults, cmpResults, mcResults } — NOT persisted
+  lastRunConfig: null,  // the AnalysisConfig object that produced lastRun
+};
+```
+
+`state.data` is loaded from `localStorage` on init and saved (`saveData()`) after every mutation.
+
+`state.lastRun` / `state.lastRunConfig` are in-memory only. Navigating away from results and back requires re-running the analysis.
+
+### Navigation
+
+```js
+navigate(page, params = {})
+```
+
+Destroys active charts, sets `state.page` / `state.params`, updates sidebar active class, calls the appropriate render function, sets `#main.innerHTML`. For `'results'`, also calls `attachResultsCharts()` via `requestAnimationFrame` after the DOM update.
+
+Sub-pages that don't have their own sidebar item are mapped in `SIDEBAR_MAP`:
+- `'baseline-detail'` highlights `'baselines'`
+- `'results'` highlights `'analysis'`
+
+---
+
+## Data Model
+
+All data lives in `state.data` and is saved as a single JSON blob to `localStorage` under key `fp_v1`.
+
+### Top-level shape
+
+```js
+{
+  version: 1,
+  baselines: Baseline[],
+  events: Event[],
+  analysisConfigs: AnalysisConfig[],
+  settings: { defaultInflationRate: 3, defaultTaxRate: 22 },
+}
+```
+
+### Baseline
+
+```js
+{
+  id, name, description, date,   // date is 'YYYY-MM'
+  createdAt,
+  assets: Asset[],
+  liabilities: Liability[],
+}
+```
+
+### Asset
+
+```js
+{
+  id, name, value,
+  category,          // from ASSET_CATEGORIES constant
+  isInvestment,      // bool — drives which growth model is used
+  isLiquid,          // bool — affects liquidNetWorth calculation
+  // if !isInvestment:
+  monthlyGrowthRate, // % per month (e.g. 0.33 ≈ 4%/yr)
+  // if isInvestment (used in Monte Carlo):
+  annualMeanReturn,  // % (e.g. 7)
+  annualStdDev,      // % (e.g. 15)
+}
+```
+
+### Liability
+
+```js
+{
+  id, name, value,   // value = current outstanding balance
+  category,
+  annualInterestRate,
+  useAmortization,   // bool
+  monthlyPayment,    // only relevant when useAmortization = true
+  includeInLiquidNW, // bool (default true) — whether to subtract this liability in liquidNetWorth
+  paymentAssetName,  // string (optional) — name of asset to deduct payment from instead of cashFlow
+}
+```
+
+**Important:** When `useAmortization` is true, the forecast engine deducts `monthlyPayment` from `cashFlow` each month (or from `paymentAssetName` asset if set) and reduces the liability balance by the principal portion. The user should NOT also create an expense event for the same payment — that would double-count it.
+
+`includeInLiquidNW` — when false, this liability is excluded from the `liquidNetWorth` calculation. Use for mortgages on illiquid property you would not sell to settle the debt.
+
+`paymentAssetName` — matched by name against assets in the baseline being analysed. If the named asset is found, the payment reduces its `.value` instead of `cashFlow`. Net worth effect is identical either way.
+
+### Event
+
+```js
+{
+  id, name, notes,
+  category,          // from EVENT_CATEGORIES constant
+  type,              // 'income' | 'expense' | 'one_time_inflow' | 'one_time_outflow'
+  amount,
+  stdDevAmount,      // optional; used in Monte Carlo to sample variable amounts
+  isRecurring,       // bool
+  startDate,         // 'YYYY-MM'
+  endDate,           // 'YYYY-MM' or '' (blank = indefinite for recurring)
+  inflationAdjusted, // bool
+  linkedAssetName,   // string (optional) — for expense/outflow: also adds amount to this asset
+}
+```
+
+One-time events: `isRecurring = false`, active only in the month matching `startDate`. Types `one_time_inflow` / `one_time_outflow` are always treated as one-time regardless of `isRecurring`.
+
+Income events have tax applied: `amount * (1 - taxRate/100)`.
+
+`linkedAssetName` — only meaningful on `expense` and `one_time_outflow` types. When set, the engine both deducts the amount from `cashFlow` (normal expense behaviour) AND adds the same amount to the named asset's value. This models a savings transfer — net worth change is zero. The asset is matched by name in the current baseline's cloned assets array. If no match is found the linkage is silently skipped.
+
+### AnalysisConfig
+
+```js
+{
+  id, name,
+  baselineId,         // primary baseline (starting point)
+  compareBaselineId,  // optional; second baseline for scenario comparison
+  startDate, endDate, // 'YYYY-MM'
+  viewMode,           // 'monthly' | 'yearly' — affects results display only
+  inflationRate,      // %/yr
+  taxRate,            // % on income events
+  monteCarlo: {
+    enabled,
+    numSimulations,           // typically 500–1000
+    standardOfLivingMonthly, // $/mo; shown as 25x annual target line on chart
+  },
+}
+```
+
+---
+
+## Forecast Engine
+
+### `runSingleForecast(baselineId, config, returnSampler, amountSampler)`
+
+Core engine. Deep-clones baseline assets/liabilities (never mutates `state.data`), builds a `Map` (name to asset) for fast lookup, then iterates month by month:
+
+1. **Capture start NW** — `sum(assets) + cashFlow - sum(liabilities)` before any mutation (stored as `startNetWorth`).
+2. **Grow assets** — non-investment: `value *= (1 + monthlyGrowthRate/100)`. Investment: `value *= (1 + annualReturn/12/100)` where `annualReturn` comes from `returnSampler(asset)` if provided (MC mode) or `asset.annualMeanReturn` (deterministic). Values clamped to >= 0.
+3. **Amortise liabilities** — for each liability with `useAmortization`, compute monthly interest, reduce balance by principal, deduct payment from `paymentAssetName` asset's value (if set and found) or from `cashFlow`. Adds payment to `expenseThisMonth`.
+4. **Apply events** — `isEventActive(event, month)` gates each event. Inflation adjustment compounds from `config.startDate`. Income multiplied by `(1 - taxRate/100)`, added to both `cashFlow` and `incomeThisMonth`. Expenses deducted from `cashFlow` and added to `expenseThisMonth`; if `linkedAssetName` is set, also adds amount to that asset's value. One-time inflows/outflows follow the same income/expense pattern.
+5. **Compute net worth** — `netWorth = sum(assets) + cashFlow - sum(liabilities)`. `liquidNetWorth` uses only `isLiquid` assets minus only liabilities with `includeInLiquidNW === true`.
+
+Returns an array of monthly result objects:
+
+```js
+{ month, netWorth, liquidNetWorth, assetTotal, liabTotal, cashFlow,
+  startNetWorth, incomeThisMonth, expenseThisMonth }
+```
+
+### `runDeterministicForecast(baselineId, config)`
+
+Calls `runSingleForecast` with no samplers.
+
+### `runMonteCarloForecast(baselineId, config, mcConfig)`
+
+Runs `runSingleForecast` N times. Each simulation uses:
+- `returnSampler`: draws `annualReturn` from `Normal(asset.annualMeanReturn, asset.annualStdDev)` using Box-Muller
+- `amountSampler`: draws amount from `Normal(event.amount, event.stdDevAmount)` if stdDevAmount > 0
+
+Collects net worth values per time step across all simulations, then computes p10/p25/p50/p75/p90 at each step. Returns:
+
+```js
+[{ month, p10, p25, p50, p75, p90 }, ...]
+```
+
+### Aggregation
+
+`aggregateYearly(monthly)` reduces monthly arrays to one row per calendar year:
+- **Balance-sheet fields** (`netWorth`, `liquidNetWorth`, `assetTotal`, `liabTotal`, `cashFlow`, `month`): last month of the year wins.
+- **Flow fields** (`incomeThisMonth`, `expenseThisMonth`): **summed** across all months in the year.
+- `startNetWorth`: the **first** month of the year's value (captured at init of each year key).
+
+`aggregateMCYearly(monthly)` uses the same last-wins logic for percentile fields. It does not handle flow fields (Monte Carlo only tracks net worth percentiles).
+
+---
+
+## Charts
+
+All Chart.js instances are pushed to `state.activeCharts` and destroyed via `destroyCharts()` on every `navigate()` call.
+
+`makeChart(canvasId, config)` is a thin wrapper that handles the push.
+
+### Net Worth Chart (`chart-nw`)
+
+- **Deterministic only**: single line, `fill: 'origin'` for area under curve.
+- **Monte Carlo**: four band datasets (p90, p75, p25, p10) with `fill: '+1'` to fill between adjacent lines. p90-p75 and p25-p10 are lighter (`rgba(37,99,235,0.07)`); p75-p25 (IQR) is medium (`rgba(37,99,235,0.13)`). All band datasets have `borderWidth: 0` and empty `label: ''` so they're hidden from the legend (legend filter: `item.text.length > 0`).
+- **Deterministic line shown alongside MC** as a dashed gray line.
+- **Compare baseline** shown as a solid green line.
+- **Standard of living target** shown as dashed orange at `standardOfLivingMonthly * 12 * 25` (25x annual = 4% SWR).
+
+### Cash Flow Chart (`chart-cf`)
+
+Simple line chart of `cashFlow` (cumulative net cash) over time, fill to origin.
+
+---
+
+## UI Patterns
+
+### Modals
+
+`showModal(title, bodyHtml, onSave, saveLabel)` — injects HTML into `#modal`, adds class `open` to `#modal-overlay`. `onSave` must return `true` to close, `false` to keep open (for validation).
+
+`showConfirm(title, msg, onConfirm, confirmLabel)` — destructive action variant.
+
+`hideModal()` — removes `open` class and the `modal-wide` class. Also triggered by clicking the overlay backdrop.
+
+All modal form fields use plain DOM reads (`document.getElementById(...).value`) inside the `onSave` callback.
+
+### Toasts
+
+`showToast(msg, type)` — type is `''` (dark), `'success'` (green), or `'error'` (red). Auto-removes after 3.2s.
+
+### HTML Escaping
+
+`esc(str)` escapes `& < > "` in all user-supplied strings interpolated into HTML templates. Use it everywhere names, descriptions, or notes appear in template literals.
+
+### Date Format
+
+All dates stored as `'YYYY-MM'` strings. `monthLabel('2026-04')` gives `'Apr 2026'` for display. `addMonths(yyyymm, n)` for arithmetic. `monthsBetween(start, end)` returns integer month count.
+
+### Help Modal
+
+`showHelpModal(tab)` — opens a wide modal (`modal-wide` class, 760px) with two tabs: **User Guide** and **Developer Guide**. Content is read from `script[type="text/x-markdown"]` elements in index.html (`#doc-readme` and `#doc-claude`) and rendered with `marked.parse()`. Falls back to `pre` display if marked is unavailable.
+
+`switchHelpTab(tab)` — toggles visibility of `#help-readme` / `#help-claude` divs and updates `.active` class on tab buttons.
+
+`hideModal()` removes `modal-wide` in addition to closing the overlay, so normal modals are unaffected.
+
+The `?` button lives in the `.sidebar-logo` div (flexbox layout), rendered by `buildSidebar()`.
+
+---
+
+## Adding a New Page
+
+1. Write a `renderFoo()` function returning an HTML string.
+2. Add a `case 'foo':` in the `navigate()` switch.
+3. Add a nav item to the `nav` array in `buildSidebar()` if it needs a sidebar entry.
+4. If it's a sub-page of an existing section, add it to `SIDEBAR_MAP`.
+
+## Adding a New Field to a Data Model
+
+1. Add the field to the relevant `default*()` function so new records get it.
+2. Update the modal form (add input, read it in `onSave`).
+3. Update the forecast engine or display logic as needed.
+4. Existing records without the field will get `undefined` — use `?? defaultValue` defensively in any code that reads it.
+
+---
+
+## Key Constants
+
+```js
+STORAGE_KEY = 'fp_v1'
+ASSET_CATEGORIES      // array of strings
+LIABILITY_CATEGORIES  // array of strings
+EVENT_CATEGORIES      // array of strings
+SIDEBAR_MAP           // { 'baseline-detail': 'baselines', 'results': 'analysis' }
+```
+  </script>
+
 </body>
 </html>

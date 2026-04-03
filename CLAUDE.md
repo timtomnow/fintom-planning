@@ -8,10 +8,10 @@ This is a self-contained, single-page financial planning app. No framework, no b
 
 | File | Purpose |
 |---|---|
-| `index.html` | Shell. Loads Chart.js CDN, `styles.css`, `app.js`. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. |
+| `index.html` | Shell. Loads Chart.js CDN, marked.js CDN, `styles.css`, `app.js`. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. |
 | `styles.css` | Full design system. CSS variables in `:root`. No external dependencies. |
-| `app.js` | Everything else — state, data, forecast engine, Monte Carlo, all page renders, charts, modals, routing. |
-| `README.txt` | End-user instructions (non-technical). |
+| `app.js` | Everything else — state, data, forecast engine, Monte Carlo, all page renders, charts, modals, routing. Also embeds `README_MD` and `CLAUDE_MD_CONTENT` as string constants for the in-app help modal. |
+| `README.md` | End-user instructions (Markdown). Replaces README.txt. |
 
 ---
 
@@ -102,10 +102,16 @@ All data lives in `state.data` and is saved as a single JSON blob to `localStora
   annualInterestRate,
   useAmortization,   // bool
   monthlyPayment,    // only relevant when useAmortization = true
+  includeInLiquidNW, // bool (default true) — whether to subtract this liability in liquidNetWorth
+  paymentAssetName,  // string (optional) — name of asset to deduct payment from instead of cashFlow
 }
 ```
 
-**Important:** When `useAmortization` is true, the forecast engine deducts `monthlyPayment` from `cashFlow` each month and reduces the liability balance by the principal portion. The user should NOT also create an expense event for the same payment — that would double-count it.
+**Important:** When `useAmortization` is true, the forecast engine deducts `monthlyPayment` from `cashFlow` each month (or from `paymentAssetName` asset if set) and reduces the liability balance by the principal portion. The user should NOT also create an expense event for the same payment — that would double-count it.
+
+`includeInLiquidNW` — when false, this liability is excluded from the `liquidNetWorth` calculation. Use for mortgages on illiquid property you would not sell to settle the debt.
+
+`paymentAssetName` — matched by name against assets in the baseline being analysed. If the named asset is found, the payment reduces its `.value` instead of `cashFlow`. Net worth effect is identical either way.
 
 ### Event
 
@@ -120,12 +126,15 @@ All data lives in `state.data` and is saved as a single JSON blob to `localStora
   startDate,         // 'YYYY-MM'
   endDate,           // 'YYYY-MM' or '' (blank = indefinite for recurring)
   inflationAdjusted, // bool
+  linkedAssetName,   // string (optional) — for expense/outflow: also adds amount to this asset
 }
 ```
 
 One-time events: `isRecurring = false`, active only in the month matching `startDate`. Types `one_time_inflow` / `one_time_outflow` are always treated as one-time regardless of `isRecurring`.
 
 Income events have tax applied: `amount * (1 - taxRate/100)`.
+
+`linkedAssetName` — only meaningful on `expense` and `one_time_outflow` types. When set, the engine both deducts the amount from `cashFlow` (normal expense behaviour) AND adds the same amount to the named asset's value. This models a savings transfer — net worth change is zero. The asset is matched by name in the current baseline's cloned assets array. If no match is found the linkage is silently skipped.
 
 ### AnalysisConfig
 
@@ -152,16 +161,18 @@ Income events have tax applied: `amount * (1 - taxRate/100)`.
 
 ### `runSingleForecast(baselineId, config, returnSampler, amountSampler)`
 
-Core engine. Deep-clones baseline assets/liabilities (never mutates `state.data`), then iterates month by month:
+Core engine. Deep-clones baseline assets/liabilities (never mutates `state.data`), builds a `Map<name, asset>` for fast lookup, then iterates month by month:
 
-1. **Grow assets** — non-investment: `value *= (1 + monthlyGrowthRate/100)`. Investment: `value *= (1 + annualReturn/12/100)` where `annualReturn` comes from `returnSampler(asset)` if provided (MC mode) or `asset.annualMeanReturn` (deterministic). Values clamped to ≥ 0.
-2. **Amortise liabilities** — for each liability with `useAmortization`, compute monthly interest, deduct payment from `cashFlow`, reduce balance by principal.
-3. **Apply events** — `isEventActive(event, month)` gates each event. Inflation adjustment compounds from `config.startDate`. Income multiplied by `(1 - taxRate/100)`. Amounts added/subtracted from `cashFlow`.
-4. **Compute net worth** — `netWorth = sum(assets) + cashFlow - sum(liabilities)`. `liquidNetWorth` uses only `isLiquid` assets.
+1. **Capture start NW** — `sum(assets) + cashFlow - sum(liabilities)` before any mutation (stored as `startNetWorth`).
+2. **Grow assets** — non-investment: `value *= (1 + monthlyGrowthRate/100)`. Investment: `value *= (1 + annualReturn/12/100)` where `annualReturn` comes from `returnSampler(asset)` if provided (MC mode) or `asset.annualMeanReturn` (deterministic). Values clamped to ≥ 0.
+3. **Amortise liabilities** — for each liability with `useAmortization`, compute monthly interest, reduce balance by principal, deduct payment from `paymentAssetName` asset's value (if set and found) or from `cashFlow`. Adds payment to `expenseThisMonth`.
+4. **Apply events** — `isEventActive(event, month)` gates each event. Inflation adjustment compounds from `config.startDate`. Income multiplied by `(1 - taxRate/100)`, added to both `cashFlow` and `incomeThisMonth`. Expenses deducted from `cashFlow` and added to `expenseThisMonth`; if `linkedAssetName` is set, also adds amount to that asset's value. One-time inflows/outflows follow the same income/expense pattern.
+5. **Compute net worth** — `netWorth = sum(assets) + cashFlow - sum(liabilities)`. `liquidNetWorth` uses only `isLiquid` assets minus only liabilities with `includeInLiquidNW === true`.
 
 Returns an array of monthly result objects:
 ```js
-{ month, netWorth, liquidNetWorth, assetTotal, liabTotal, cashFlow }
+{ month, netWorth, liquidNetWorth, assetTotal, liabTotal, cashFlow,
+  startNetWorth, incomeThisMonth, expenseThisMonth }
 ```
 
 ### `runDeterministicForecast(baselineId, config)`
@@ -181,7 +192,12 @@ Collects net worth values per time step across all simulations, then computes p1
 
 ### Aggregation
 
-`aggregateYearly(monthly)` and `aggregateMCYearly(monthly)` reduce monthly arrays to one row per calendar year (last month of each year wins). Used when `viewMode === 'yearly'`.
+`aggregateYearly(monthly)` reduces monthly arrays to one row per calendar year:
+- **Balance-sheet fields** (`netWorth`, `liquidNetWorth`, `assetTotal`, `liabTotal`, `cashFlow`, `month`): last month of the year wins.
+- **Flow fields** (`incomeThisMonth`, `expenseThisMonth`): **summed** across all months in the year.
+- `startNetWorth`: the **first** month of the year's value (captured at init of each year key).
+
+`aggregateMCYearly(monthly)` uses the same last-wins logic for percentile fields. It does not handle flow fields (Monte Carlo only tracks net worth percentiles).
 
 ---
 
@@ -228,6 +244,18 @@ All modal form fields use plain DOM reads (`document.getElementById(...).value`)
 ### Date Format
 
 All dates stored as `'YYYY-MM'` strings. `monthLabel('2026-04')` → `'Apr 2026'` for display. `addMonths(yyyymm, n)` for arithmetic. `monthsBetween(start, end)` returns integer month count.
+
+### Help Modal
+
+`showHelpModal(tab)` — opens a wide modal (`modal-wide` class, 760px) with two tabs: **User Guide** (renders `README_MD` constant) and **Developer Guide** (renders `CLAUDE_MD_CONTENT` constant). Both constants are declared at the top of `app.js` as template literals containing the full markdown content of each file.
+
+Rendering uses `marked.parse()` (marked.js loaded from CDN in `index.html`). Falls back to `<pre>` display if marked is unavailable.
+
+`switchHelpTab(tab)` — toggles visibility of `#help-readme` / `#help-claude` divs and updates `.active` class on the tab buttons.
+
+`hideModal()` removes the `modal-wide` class in addition to closing the overlay, so normal modals are not affected.
+
+The `?` button is rendered in the sidebar logo area via `buildSidebar()` — it's a `.help-btn` element positioned with flexbox on the `.sidebar-logo` div.
 
 ---
 
