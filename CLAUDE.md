@@ -122,15 +122,18 @@ Older saves without `eventSets` are migrated on load: `state.data.eventSets = st
 ```js
 {
   id, name, notes,
-  category,          // from EVENT_CATEGORIES constant
-  type,              // 'income' | 'expense' | 'one_time_inflow' | 'one_time_outflow'
+  category,             // from EVENT_CATEGORIES constant
+  type,                 // 'income' | 'expense' | 'one_time_inflow' | 'one_time_outflow'
   amount,
-  stdDevAmount,      // optional; used in Monte Carlo to sample variable amounts
-  isRecurring,       // bool
-  startDate,         // 'YYYY-MM'
-  endDate,           // 'YYYY-MM' or '' (blank = indefinite for recurring)
-  inflationAdjusted, // bool
-  linkedAssetName,   // string (optional) — for expense/outflow: also adds amount to this asset
+  stdDevAmount,         // optional; used in Monte Carlo to sample variable amounts
+  isRecurring,          // bool
+  startDate,            // 'YYYY-MM'
+  endDate,              // 'YYYY-MM' or '' (blank = indefinite for recurring)
+  inflationAdjusted,    // bool
+  depositToAssetName,   // string (optional) — income/inflow: route net amount into this asset
+  payFromAssetName,     // string (optional) — expense/outflow: deduct from this asset instead of cashFlow
+  linkedAssetName,      // string (optional) — expense/outflow: NW-neutral transfer into this asset
+  linkedLiabilityName,  // string (optional) — expense/outflow: extra principal payment to this liability
 }
 ```
 
@@ -138,7 +141,15 @@ One-time events: `isRecurring = false`, active only in the month matching `start
 
 Income events have tax applied: `amount * (1 - taxRate/100)`.
 
-`linkedAssetName` — only meaningful on `expense` and `one_time_outflow` types. When set and the named asset is found, the engine deducts the amount from `cashFlow` AND adds it to the asset's value (NW-neutral transfer). The amount counts as `transferThisMonth`, not `expenseThisMonth`. If the named asset is not found, the linkage is silently skipped and the amount counts as a normal expense.
+**Event linking fields (all matched by name, silently skipped if name not found):**
+
+`depositToAssetName` — income and `one_time_inflow` only. When set, the after-tax amount is added to that asset's `.value` instead of `cashFlow`. Useful for routing a paycheck directly into a brokerage or savings account. Amount still counted in `incomeThisMonth`.
+
+`payFromAssetName` — expense and `one_time_outflow` only. When set, the amount is deducted from that asset's `.value` (clamped to ≥ 0) instead of `cashFlow`. Net worth effect is identical either way — this controls how individual account balances track.
+
+`linkedAssetName` — expense and `one_time_outflow` only. When set and found, the engine deducts the amount from `cashFlow` (or `payFromAssetName` asset if also set) AND adds the same amount to the linked asset's value. Net worth change = $0. Amount counted as `transferThisMonth`, not `expenseThisMonth`. If asset not found, falls back to `expenseThisMonth`.
+
+`linkedLiabilityName` — expense and `one_time_outflow` only. When set and the named liability is found, the amount also reduces that liability's balance (extra principal payment). Net worth change = $0. Amount counted as `transferThisMonth`. If liability not found, falls back to `expenseThisMonth`. Use for one-time or recurring extra mortgage/loan payments.
 
 ### EventSet
 
@@ -178,19 +189,27 @@ Event sets are named collections of events attached to a specific analysis confi
 
 ### `runSingleForecast(baselineId, config, returnSampler, amountSampler, events = null)`
 
-Core engine. Deep-clones baseline assets/liabilities (never mutates `state.data`), builds a `Map<name, asset>` for fast lookup, then iterates month by month:
+Core engine. Deep-clones baseline assets/liabilities (never mutates `state.data`), builds `assetMap` and `liabMap` (`Map<name, object>`) for fast lookup, then iterates month by month:
 
 1. **Capture start NW** — `sum(assets) + cashFlow - sum(liabilities)` before any mutation (stored as `startNetWorth`).
 2. **Grow assets** — non-investment: `value *= (1 + monthlyGrowthRate/100)`. Investment: `value *= (1 + annualReturn/12/100)` where `annualReturn` comes from `returnSampler(asset)` if provided (MC mode) or `asset.annualMeanReturn` (deterministic). Values clamped to ≥ 0.
 3. **Amortise liabilities** — for each liability with `useAmortization`, compute monthly interest, reduce balance by principal, deduct payment from `paymentAssetName` asset's value (if set and found) or from `cashFlow`. Adds payment to `expenseThisMonth`.
-4. **Apply events** — uses the `events` array if provided, otherwise falls back to `state.data.events`. `isEventActive(event, month)` gates each event. Inflation adjustment compounds from `config.startDate`. Income multiplied by `(1 - taxRate/100)`, added to both `cashFlow` and `incomeThisMonth`. Expenses deducted from `cashFlow`; if `linkedAssetName` resolves to an asset, the amount also adds to that asset's value and goes to `transferThisMonth` (not `expenseThisMonth`); if the asset is not found it falls back to `expenseThisMonth`. One-time inflows/outflows follow the same pattern.
+4. **Apply events** — uses the `events` array if provided, otherwise falls back to `state.data.events`. `isEventActive(event, month)` gates each event. Inflation adjustment compounds from `config.startDate`. For each active event:
+   - **Income / one_time_inflow**: after-tax amount goes to `depositToAssetName` asset's value if set, otherwise to `cashFlow`. Always adds to `incomeThisMonth`.
+   - **Expense / one_time_outflow**: amount deducted from `payFromAssetName` asset's value if set, otherwise from `cashFlow`. Then: if `linkedLiabilityName` resolves to a liability, reduces its balance (`transferThisMonth`); else if `linkedAssetName` resolves to an asset, adds to its value (`transferThisMonth`); otherwise `expenseThisMonth`. Unresolved names fall through to `expenseThisMonth`.
 5. **Compute net worth** — `netWorth = sum(assets) + cashFlow - sum(liabilities)`. `liquidNetWorth` uses only `isLiquid` assets minus only liabilities with `includeInLiquidNW === true`.
+
+Before the month loop, the engine pre-creates virtual assets (value = 0, `_virtual: true`) for any `depositToAssetName` that doesn't exist in the baseline — so income can be routed to an asset that starts at $0.
 
 Returns an array of monthly result objects:
 ```js
 { month, netWorth, liquidNetWorth, assetTotal, liabTotal, cashFlow,
-  startNetWorth, incomeThisMonth, expenseThisMonth, transferThisMonth }
+  startNetWorth, incomeThisMonth, expenseThisMonth, transferThisMonth,
+  assetSnapshots: [{ id, name, value }, ...],   // per-asset balances at end of month
+  liabSnapshots:  [{ id, name, value }, ...] }  // per-liability balances at end of month
 ```
+
+`assetSnapshots` and `liabSnapshots` power the **Baseline Values Over Time** table in the Results page — they let the UI show what any individual account/loan balance is at any selected month.
 
 ### `runDeterministicForecast(baselineId, config, events = null)`
 

@@ -78,12 +78,27 @@ Events model all recurring and one-time cash flows.
 - **Adjust for inflation** — amount grows at the configured inflation rate each month
 - **Std Dev ($)** — add variability for Monte Carlo (e.g., a bonus that might be $5k–$15k)
 
+**Deposit into Asset** *(income / inflow only — optional):*
+- Routes the after-tax amount directly into a specific asset's balance instead of the general cash pool.
+- **Example:** Paycheck auto-invested into your brokerage — the account balance grows and cash flow is unchanged.
+- If the named asset doesn't exist in the baseline, a virtual asset starting at $0 is created automatically.
+
+**Pay from Asset** *(expense / outflow only — optional):*
+- Deducts the expense from a specific asset's balance instead of the cash pool.
+- **Example:** A monthly bill paid from your Checking Account — the checking balance decreases, not the general cash accumulator.
+- Net worth effect is the same either way; this setting controls how individual account balances track over time.
+
 **Transfer to Asset** *(expense / outflow only — optional):*
-- Links the outflow to a specific asset. The cash flow decreases by the amount AND the named asset's value increases by the same amount.
-- **Net worth change = $0** — this is a transfer, not a real expense (you're moving money from cash into an asset)
-- **Example:** A $1,000/month savings deposit into your Investment account. Without this link, the $1,000 reduces net worth. With the link, cash decreases by $1,000 and the investment increases by $1,000 — net worth is unchanged, which correctly models a savings contribution.
+- Links the outflow to a specific asset. The source (cash or Pay From Asset) decreases AND the named asset's value increases by the same amount.
+- **Net worth change = $0** — this is a transfer, not a real expense (you're moving money between accounts).
+- **Example:** A $1,000/month savings contribution. Cash decreases by $1,000 and the investment account increases by $1,000 — net worth is unchanged.
 - Transfers appear in their own column in the Results table and are excluded from the Expenses and Cash Flow columns.
-- The asset name must match an asset in the baseline being analysed (matched by name)
+
+**Extra Payment to Liability** *(expense / outflow only — optional):*
+- Also reduces the named liability's principal balance by the payment amount (in addition to the regular amortisation schedule).
+- **Net worth change = $0** — you're converting cash into reduced debt.
+- **Example:** A one-time $10,000 extra mortgage payment. Counted as a transfer, not an expense.
+- All link fields are matched by name against the baseline being analysed. Unmatched names are silently ignored and treated as a regular expense.
 
 ---
 
@@ -140,7 +155,7 @@ Toggle between **Monthly** and **Yearly** view. Export the full table to **CSV**
 | Start NW | Net worth at the start of the period (before growth, payments, events) |
 | + Income | After-tax income and one-time inflows received during the period |
 | − Expenses | Expenses, one-time outflows, and loan payments during the period (transfers excluded) |
-| → Transfers | NW-neutral transfers to assets (expense/outflow events with Transfer to Asset set) |
+| → Transfers | NW-neutral transfers — savings contributions, asset purchases, extra loan payments |
 | = Cash Flow | Income minus Expenses for the period (transfers not counted) |
 | Cum. Cash Flow | Running cumulative sum of Cash Flow from the start of the forecast |
 | Δ NW | Change in net worth — includes asset appreciation, not just cash flows |
@@ -151,6 +166,10 @@ Toggle between **Monthly** and **Yearly** view. Export the full table to **CSV**
 
 > **Note on Δ NW vs Cash Flow:** Cash Flow ≠ Δ NW. The difference is asset appreciation (investment growth, property appreciation) which increases net worth without appearing in the cash flow columns.
 
+**Baseline Values Over Time table:**
+
+Below the detail table, a second table shows every asset, liability, and the accumulated cash flow with four columns: **Start**, **At Month** (interactive), **Change**, and **End**. Use the dropdown to pick any month in the forecast period — the "At Month" column updates instantly to show what each account balance or loan balance looks like at that point. Assets created by "Deposit into Asset" events that don't exist in the baseline are shown as **Asset (new)** rows starting from $0.
+
 ---
 
 ## How the Forecast Works
@@ -159,7 +178,7 @@ Each month the engine:
 
 1. **Grows each asset** — non-investment: `value × (1 + monthlyRate/100)` — investment: `value × (1 + annualReturn/12/100)` where the return is the mean (deterministic) or a sampled value (Monte Carlo)
 2. **Amortises liabilities** — for each amortising loan, splits the payment into principal and interest, reduces the balance, and deducts the payment from the payment source asset (or cash flow if none set)
-3. **Applies events** — income after tax adds to cash flow; expenses and outflows subtract; outflows with a Transfer to Asset add the amount to that asset's value and count as a transfer (not an expense)
+3. **Applies events** — income after tax goes into the "Deposit into Asset" account if set, otherwise the cash pool; expenses deduct from the "Pay from Asset" account if set, otherwise the cash pool; outflows with "Transfer to Asset" or "Extra Payment to Liability" are NW-neutral and counted as transfers
 4. **Computes net worth** — `Total Assets + Cumulative Cash Flow − Total Liabilities`
 
 **Liquid Net Worth** uses only liquid assets and only liabilities with "Include in Liquid NW" enabled.
@@ -173,6 +192,10 @@ Each month the engine:
 - For a mortgage: add it as a **liability with amortisation**. Do not add a separate expense event for the payment.
 - Set the **Payment Source Asset** on your mortgage to track your checking account balance accurately.
 - For savings contributions: use **Transfer to Asset** on an expense event so your investment account grows from deposits while net worth stays unchanged (it's just moving money).
+- For a paycheck deposited into a brokerage: use **Deposit into Asset** on an income event so the account balance tracks correctly.
+- For a bill paid from a specific account: use **Pay from Asset** on an expense event to track that account's balance declining over time.
+- For extra mortgage/loan payments: use **Extra Payment to Liability** on a one-time outflow to model accelerated payoff. Combine with **Pay from Asset** to show exactly which account it comes from.
+- Use the **Baseline Values Over Time** table in Results to see when specific assets or liabilities hit key milestones — pick any month with the dropdown.
 - For variable income (bonuses, freelance): add a **Std Dev** to the event so Monte Carlo reflects the uncertainty.
 - Run Monte Carlo with **500+ simulations** for reliable percentile bands.
 - Use the **sustainability target line** to see when your portfolio could sustain your lifestyle indefinitely.

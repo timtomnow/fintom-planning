@@ -88,6 +88,9 @@ function defaultEvent() {
     startDate: today(), endDate: '',
     inflationAdjusted: false, notes: '',
     linkedAssetName: '',
+    depositToAssetName: '',
+    payFromAssetName: '',
+    linkedLiabilityName: '',
   };
 }
 
@@ -283,8 +286,20 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
   const liabilities = deepClone(baseline.liabilities ?? []);
   let cashFlow = 0; // accumulated net cash since baseline date
 
-  // Build name→asset map for event/liability linking (references same objects as assets array)
+  // Build name→asset/liability maps for event linking (references same objects as arrays)
   const assetMap = new Map(assets.map(a => [a.name, a]));
+  const liabMap  = new Map(liabilities.map(l => [l.name, l]));
+
+  // Pre-create any deposit-target assets that don't exist in the baseline (start at $0)
+  const eventsToScan = events ?? state.data.events;
+  for (const ev of eventsToScan) {
+    if (ev.depositToAssetName && !assetMap.has(ev.depositToAssetName)) {
+      const virtual = { id: `virtual-${ev.depositToAssetName}`, name: ev.depositToAssetName,
+        value: 0, isInvestment: false, isLiquid: true, monthlyGrowthRate: 0, _virtual: true };
+      assets.push(virtual);
+      assetMap.set(ev.depositToAssetName, virtual);
+    }
+  }
 
   return months.map(month => {
     // Capture net worth at start of month (before any updates)
@@ -338,40 +353,64 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
       switch (ev.type) {
         case 'income': {
           const net = amount * (1 - (config.taxRate ?? 0) / 100);
-          cashFlow += net;
+          const depositAsset = ev.depositToAssetName ? assetMap.get(ev.depositToAssetName) : null;
+          if (depositAsset) {
+            depositAsset.value += net;
+          } else {
+            cashFlow += net;
+          }
           incomeThisMonth += net;
           break;
         }
         case 'expense': {
-          cashFlow -= amount;
-          if (ev.linkedAssetName) {
+        // Deduct from source asset or cash flow
+          const srcAsset = ev.payFromAssetName ? assetMap.get(ev.payFromAssetName) : null;
+          if (srcAsset) {
+            srcAsset.value = Math.max(0, srcAsset.value - amount);
+          } else {
+            cashFlow -= amount;
+          }
+          // Apply to liability (extra principal), destination asset (transfer), or count as expense
+          if (ev.linkedLiabilityName) {
+            const liab = liabMap.get(ev.linkedLiabilityName);
+            if (liab) { liab.value = Math.max(0, liab.value - amount); transferThisMonth += amount; }
+            else { expenseThisMonth += amount; }
+          } else if (ev.linkedAssetName) {
             const linked = assetMap.get(ev.linkedAssetName);
-            if (linked) {
-              linked.value += amount;
-              transferThisMonth += amount;
-            } else {
-              expenseThisMonth += amount;
-            }
+            if (linked) { linked.value += amount; transferThisMonth += amount; }
+            else { expenseThisMonth += amount; }
           } else {
             expenseThisMonth += amount;
           }
           break;
         }
         case 'one_time_inflow': {
-          cashFlow += amount;
+          const depositAsset = ev.depositToAssetName ? assetMap.get(ev.depositToAssetName) : null;
+          if (depositAsset) {
+            depositAsset.value += amount;
+          } else {
+            cashFlow += amount;
+          }
           incomeThisMonth += amount;
           break;
         }
         case 'one_time_outflow': {
-          cashFlow -= amount;
-          if (ev.linkedAssetName) {
+          // Deduct from source asset or cash flow
+          const srcAsset = ev.payFromAssetName ? assetMap.get(ev.payFromAssetName) : null;
+          if (srcAsset) {
+            srcAsset.value = Math.max(0, srcAsset.value - amount);
+          } else {
+            cashFlow -= amount;
+          }
+          // Apply to liability, destination asset, or count as expense
+          if (ev.linkedLiabilityName) {
+            const liab = liabMap.get(ev.linkedLiabilityName);
+            if (liab) { liab.value = Math.max(0, liab.value - amount); transferThisMonth += amount; }
+            else { expenseThisMonth += amount; }
+          } else if (ev.linkedAssetName) {
             const linked = assetMap.get(ev.linkedAssetName);
-            if (linked) {
-              linked.value += amount;
-              transferThisMonth += amount;
-            } else {
-              expenseThisMonth += amount;
-            }
+            if (linked) { linked.value += amount; transferThisMonth += amount; }
+            else { expenseThisMonth += amount; }
           } else {
             expenseThisMonth += amount;
           }
@@ -389,7 +428,9 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
     const liquidNetWorth  = liquidTotal + cashFlow - liquidLiabTotal;
 
     return { month, netWorth, liquidNetWorth, assetTotal, liabTotal, cashFlow,
-             startNetWorth, incomeThisMonth, expenseThisMonth, transferThisMonth };
+             startNetWorth, incomeThisMonth, expenseThisMonth, transferThisMonth,
+             assetSnapshots: assets.map(a => ({ id: a.id, name: a.name, value: a.value })),
+             liabSnapshots:  liabilities.map(l => ({ id: l.id, name: l.name, value: l.value })) };
   });
 }
 
@@ -1179,7 +1220,7 @@ function renderEvents() {
             <th>Name</th><th>Type</th><th>Category</th>
             <th class="text-right">Amount</th>
             <th>Frequency</th><th>Period</th>
-            <th>Inflation</th><th>Transfer To</th><th></th>
+            <th>Inflation</th><th>Links</th><th></th>
           </tr></thead>
           <tbody>
             ${filtered.map(ev => `<tr>
@@ -1198,7 +1239,14 @@ function renderEvents() {
                 ${monthLabel(ev.startDate)}${ev.isRecurring && ev.endDate ? ` – ${monthLabel(ev.endDate)}` : ev.isRecurring ? ' onwards' : ''}
               </td>
               <td>${ev.inflationAdjusted ? '✓' : '<span class="text-muted">—</span>'}</td>
-              <td class="text-muted" style="font-size:12px;">${ev.linkedAssetName ? esc(ev.linkedAssetName) : '<span class="text-muted">—</span>'}</td>
+              <td style="font-size:12px;">${(() => {
+                const parts = [];
+                if (ev.depositToAssetName)  parts.push(`→ ${esc(ev.depositToAssetName)}`);
+                if (ev.payFromAssetName)    parts.push(`← ${esc(ev.payFromAssetName)}`);
+                if (ev.linkedAssetName)     parts.push(`⇌ ${esc(ev.linkedAssetName)}`);
+                if (ev.linkedLiabilityName) parts.push(`↓ ${esc(ev.linkedLiabilityName)}`);
+                return parts.length ? parts.join('<br>') : '<span class="text-muted">—</span>';
+              })()}</td>
               <td>
                 <div class="flex gap-2 justify-end">
                   <button class="btn btn-sm btn-ghost" onclick="openEventModal('${ev.id}')">Edit</button>
@@ -1220,8 +1268,14 @@ function openEventModal(id = null) {
   const allAssetNames = [...new Set(
     state.data.baselines.flatMap(bl => (bl.assets ?? []).map(a => a.name).filter(Boolean))
   )].sort();
-  const linkedAssetOptions = `<option value="">— None —</option>`
-    + allAssetNames.map(n => `<option${(ev.linkedAssetName ?? '') === n ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  const allLiabNames = [...new Set(
+    state.data.baselines.flatMap(bl => (bl.liabilities ?? []).map(l => l.name).filter(Boolean))
+  )].sort();
+  const assetOptions = (selected) => `<option value="">— None —</option>`
+    + allAssetNames.map(n => `<option${selected === n ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  const linkedAssetOptions = assetOptions(ev.linkedAssetName ?? '');
+  const isInflow = ev.type === 'income' || ev.type === 'one_time_inflow';
+  const isOutflow = ev.type === 'expense' || ev.type === 'one_time_outflow';
 
   showModal(existing ? 'Edit Event' : 'Add Event', `
     <div class="form-row">
@@ -1289,10 +1343,25 @@ function openEventModal(id = null) {
       <label>Notes <span class="label-note">(optional)</span></label>
       <input type="text" id="ev-notes" value="${esc(ev.notes ?? '')}" placeholder="Any additional context">
     </div>
-    <div class="form-group" id="ev-link-wrap" ${(ev.type === 'income' || ev.type === 'one_time_inflow') ? 'style="display:none"' : ''}>
+    <div class="form-group" id="ev-deposit-wrap"${isInflow ? '' : ' style="display:none"'}>
+      <label>Deposit into Asset <span class="label-note">(income / inflow only)</span></label>
+      <select id="ev-deposit-asset">${assetOptions(ev.depositToAssetName ?? '')}</select>
+      <div class="form-hint">Income goes directly into this asset instead of the general cash pool (e.g., paycheck auto-invested).</div>
+    </div>
+    <div class="form-group" id="ev-pay-from-wrap"${isOutflow ? '' : ' style="display:none"'}>
+      <label>Pay from Asset <span class="label-note">(expense / outflow only)</span></label>
+      <select id="ev-pay-from-asset">${assetOptions(ev.payFromAssetName ?? '')}</select>
+      <div class="form-hint">Deduct this expense from a specific asset instead of the cash pool (e.g., bill paid from savings account).</div>
+    </div>
+    <div class="form-group" id="ev-link-wrap"${isOutflow ? '' : ' style="display:none"'}>
       <label>Transfer to Asset <span class="label-note">(expense / outflow only)</span></label>
       <select id="ev-link-asset">${linkedAssetOptions}</select>
-      <div class="form-hint">When set, the outflow also adds the same amount to this asset (e.g., $1,000 savings deposit into Investments). Net worth change = $0.</div>
+      <div class="form-hint">Outflow also adds the same amount to this asset (e.g., cash purchase of an investment). Net worth change = $0.</div>
+    </div>
+    <div class="form-group" id="ev-link-liab-wrap"${isOutflow ? '' : ' style="display:none"'}>
+      <label>Extra Payment to Liability <span class="label-note">(expense / outflow only)</span></label>
+      <select id="ev-link-liab"><option value="">— None —</option>${allLiabNames.map(n => `<option${(ev.linkedLiabilityName ?? '') === n ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
+      <div class="form-hint">Also reduces this liability's principal balance (e.g., extra mortgage payment). Net worth change = $0.</div>
     </div>
   `, () => {
     const name = document.getElementById('ev-name').value.trim();
@@ -1301,7 +1370,8 @@ function openEventModal(id = null) {
     if (!startDate) { showToast('Date is required', 'error'); return false; }
 
     const type = document.getElementById('ev-type').value;
-    const isOutflow = type === 'expense' || type === 'one_time_outflow';
+    const isOutflowSave = type === 'expense' || type === 'one_time_outflow';
+    const isInflowSave  = type === 'income'  || type === 'one_time_inflow';
 
     const updated = {
       id: existing?.id ?? uuid(),
@@ -1315,7 +1385,10 @@ function openEventModal(id = null) {
       endDate: document.getElementById('ev-end').value || '',
       inflationAdjusted: document.getElementById('ev-inf').checked,
       notes: document.getElementById('ev-notes').value.trim(),
-      linkedAssetName: isOutflow ? document.getElementById('ev-link-asset').value : '',
+      linkedAssetName:     isOutflowSave ? document.getElementById('ev-link-asset').value    : '',
+      depositToAssetName:  isInflowSave  ? document.getElementById('ev-deposit-asset').value : '',
+      payFromAssetName:    isOutflowSave ? document.getElementById('ev-pay-from-asset').value : '',
+      linkedLiabilityName: isOutflowSave ? document.getElementById('ev-link-liab').value      : '',
     };
 
     if (existing) {
@@ -1332,10 +1405,14 @@ function openEventModal(id = null) {
 
 function onEvTypeChange() {
   const type = document.getElementById('ev-type').value;
-  const oneTime = type === 'one_time_inflow' || type === 'one_time_outflow';
+  const oneTime   = type === 'one_time_inflow' || type === 'one_time_outflow';
   const isOutflow = type === 'expense' || type === 'one_time_outflow';
-  document.getElementById('ev-tax-note').style.display = type === 'income' ? '' : 'none';
-  document.getElementById('ev-link-wrap').style.display = isOutflow ? '' : 'none';
+  const isInflow  = type === 'income'  || type === 'one_time_inflow';
+  document.getElementById('ev-tax-note').style.display      = type === 'income' ? '' : 'none';
+  document.getElementById('ev-deposit-wrap').style.display  = isInflow  ? '' : 'none';
+  document.getElementById('ev-pay-from-wrap').style.display = isOutflow ? '' : 'none';
+  document.getElementById('ev-link-wrap').style.display     = isOutflow ? '' : 'none';
+  document.getElementById('ev-link-liab-wrap').style.display = isOutflow ? '' : 'none';
   if (oneTime) {
     document.getElementById('ev-rec').checked = false;
     document.getElementById('ev-rec').disabled = true;
@@ -2009,6 +2086,81 @@ function renderResults() {
         </table>
       </div>
     </div>
+
+    <!-- Baseline values over time -->
+    ${(() => {
+      const baseline = pBl;
+      if (!baseline) return '';
+      const first = run.detResults[0];
+      const last  = run.detResults[run.detResults.length - 1];
+
+      const monthOptions = run.detResults.map(r =>
+        `<option value="${r.month}">${monthLabel(r.month)}</option>`
+      ).join('');
+
+      const baselineAssetNames = new Set((baseline.assets ?? []).map(a => a.name));
+      const virtualAssets = (first.assetSnapshots ?? []).filter(s => !baselineAssetNames.has(s.name));
+
+      const rows = [
+        ...(baseline.assets ?? []).map(a => ({
+          type: 'asset', name: a.name, startVal: a.value,
+          endVal: last.assetSnapshots?.find(s => s.name === a.name)?.value ?? 0,
+          atVal:  first.assetSnapshots?.find(s => s.name === a.name)?.value ?? 0,
+        })),
+        ...virtualAssets.map(s => ({
+          type: 'asset-virtual', name: s.name, startVal: 0,
+          endVal: last.assetSnapshots?.find(snap => snap.name === s.name)?.value ?? 0,
+          atVal:  s.value,
+        })),
+        { type: 'cash', name: 'Cash Flow (accumulated)', startVal: 0,
+          endVal: last.cashFlow, atVal: first.cashFlow },
+        ...(baseline.liabilities ?? []).map(l => ({
+          type: 'liability', name: l.name, startVal: l.value,
+          endVal: last.liabSnapshots?.find(s => s.name === l.name)?.value ?? 0,
+          atVal:  first.liabSnapshots?.find(s => s.name === l.name)?.value ?? 0,
+        })),
+      ];
+
+      const tableRows = rows.map(item => {
+        const typeLabel = item.type === 'asset' ? 'Asset'
+          : item.type === 'asset-virtual' ? 'Asset (new)'
+          : item.type === 'liability' ? 'Liability' : 'Cash';
+        const endChange = item.endVal - item.startVal;
+        return `<tr data-bv-type="${item.type}" data-bv-name="${esc(item.name)}">
+          <td>${esc(item.name)}</td>
+          <td class="text-muted">${typeLabel}</td>
+          <td class="text-right font-mono">${fmt$(item.startVal)}</td>
+          <td class="text-right font-mono bv-at-val">${fmt$(item.atVal)}</td>
+          <td class="text-right font-mono ${item.type === 'liability' ? (endChange <= 0 ? 'text-positive' : 'text-negative') : (endChange >= 0 ? 'text-positive' : 'text-negative')}">${endChange >= 0 ? '+' : ''}${fmt$(endChange)}</td>
+          <td class="text-right font-mono">${fmt$(item.endVal)}</td>
+        </tr>`;
+      }).join('');
+
+      return `<div class="card" style="margin-top:20px;">
+        <div class="section-header" style="margin-bottom:12px;">
+          <div class="section-title">Baseline Values Over Time</div>
+          <div class="flex items-center gap-2">
+            <label style="font-size:13px;color:var(--text-muted);">At month:</label>
+            <select id="bv-month-select" style="width:auto;" onchange="updateBaselineValuesAt()">
+              ${monthOptions}
+            </select>
+          </div>
+        </div>
+        <div class="result-table-wrap">
+          <table>
+            <thead><tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th class="text-right">Start (${monthLabel(cfg.startDate)})</th>
+              <th class="text-right" id="bv-at-header">At ${monthLabel(cfg.startDate)}</th>
+              <th class="text-right">Change (total)</th>
+              <th class="text-right">End (${monthLabel(cfg.endDate)})</th>
+            </tr></thead>
+            <tbody id="bv-tbody">${tableRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+    })()}
   </div>`;
 }
 
@@ -2186,6 +2338,33 @@ function exportCSV() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('CSV exported');
+}
+
+function updateBaselineValuesAt() {
+  const sel = document.getElementById('bv-month-select');
+  if (!sel || !state.lastRun) return;
+  const month = sel.value;
+  const result = state.lastRun.detResults.find(r => r.month === month);
+  if (!result) return;
+
+  const header = document.getElementById('bv-at-header');
+  if (header) header.textContent = `At ${monthLabel(month)}`;
+
+  document.querySelectorAll('#bv-tbody tr').forEach(row => {
+    const type = row.dataset.bvType;
+    const name = row.dataset.bvName;
+    const cell = row.querySelector('.bv-at-val');
+    if (!cell) return;
+    let val;
+    if (type === 'asset' || type === 'asset-virtual') {
+      val = result.assetSnapshots?.find(s => s.name === name)?.value ?? 0;
+    } else if (type === 'cash') {
+      val = result.cashFlow;
+    } else {
+      val = result.liabSnapshots?.find(s => s.name === name)?.value ?? 0;
+    }
+    cell.textContent = fmt$(val);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
