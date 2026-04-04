@@ -2192,7 +2192,7 @@ function openOverrideEventModal(cfgId, existingId, defaultMonth) {
   // Synthetic loan_payment entries: remap to expense so they're editable in the modal
   if (!existing && existingTable) {
     existing = existingTable.type === 'loan_payment'
-      ? { ...existingTable, type: 'expense', isRecurring: false, endDate: '' }
+      ? { ...existingTable, type: 'expense', isRecurring: false, endDate: '', linkedLiabilityName: existingTable.name }
       : { ...existingTable };
   }
   const ev = existing ? { ...existing } : { ...defaultEvent(), startDate: defaultMonth ?? today() };
