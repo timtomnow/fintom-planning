@@ -7,7 +7,7 @@
 const STORAGE_KEY = 'fp_v1';
 
 const ASSET_CATEGORIES = [
-  'Cash & Savings', 'Brokerage', 'Retirement (401k/IRA)',
+  'Bank Account', 'Investment Account',
   'Real Estate', 'Vehicle', 'Business', 'Other',
 ];
 
@@ -19,7 +19,8 @@ const LIABILITY_CATEGORIES = [
 const EVENT_CATEGORIES = [
   'Income', 'Housing', 'Transportation', 'Food & Dining',
   'Healthcare', 'Education', 'Entertainment', 'Insurance',
-  'Childcare', 'Travel', 'Utilities', 'Savings & Investment', 'Other',
+  'Childcare', 'Travel', 'Utilities', 'Savings & Investment',
+  'Living Expenses', 'Transfers', 'Other',
 ];
 
 // Maps sub-pages to their parent sidebar page for active highlighting

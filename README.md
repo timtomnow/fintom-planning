@@ -36,7 +36,7 @@ Each asset has a name, category, and current value, plus a growth model:
 | Mode | When to use | Parameters |
 |---|---|---|
 | **Non-investment** | Home, car, savings account | Monthly growth rate % (e.g. 0.33% ≈ 4%/yr) |
-| **Investment** | Brokerage, 401k, IRA | Annual mean return % + annual std deviation % |
+| **Investment** | Investment accounts, ETFs, stocks | Annual mean return % + annual std deviation % |
 
 - Mark assets as **Liquid** if they can be sold or spent quickly. Liquid assets feed into the *Liquid Net Worth* calculation.
 - Investment mode enables Monte Carlo — each simulation samples the monthly return from a normal distribution defined by mean and std deviation.
