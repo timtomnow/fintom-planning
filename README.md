@@ -179,7 +179,14 @@ Toggle between **Monthly** and **Yearly** view. Use **Re-Run** to re-run the ana
 
 **Expandable period rows:**
 
-Every row in the detail table is clickable. Click any row to expand it and see which events were active in that period, along with their amounts and cash-flow impact (+income, −expense, 0 for transfers). You can **Edit** any event directly from the expanded view — edits are saved to this analysis only and do not affect the global Events page. You can also **+ Add Event** to any period.
+Every row in the detail table is clickable. Click any row to expand it and see which events and loan payments were active in that period, along with their amounts and cash-flow impact (+income, −expense, 0 for transfers). Amortizing liabilities appear as **Loan Payment** rows (shown in grey) with their computed payment for the period. Extra principal payment events appear as separate rows and are not merged into the Loan Payment row.
+
+- You can **Edit** any event row — edits are saved to this analysis only and do not affect the global Events page.
+- In **Monthly view**, clicking Edit on a Loan Payment row opens a pre-filled "Edit Analysis Event" form for that specific payment, letting you add overrides for the period.
+- In **Yearly view**, clicking Edit on a Loan Payment row opens a blank "Add Analysis Event" form for that year's start month (since the yearly total spans multiple individual payments).
+- You can also **+ Add Event** to any period.
+
+The **Cash Flow** column in the expanded sub-table reflects the actual impact on the cash accumulator: events routed through assets (via "Deposit into Asset" or "Pay from Asset") show `—` since they do not affect the cash pool directly.
 
 After editing, a warning banner appears at the top of the page indicating the results are out of date. Click **Re-run now** or the **Re-Run** button in the header to refresh.
 
@@ -189,7 +196,11 @@ Below the detail table, a second table shows every asset, liability, and the acc
 
 **All Analysis Events table:**
 
-At the bottom of the Results page, a full list of all events used in the analysis is shown. It is paginated (25 rows per page) and can be filtered by event name (text search), category, and type using the filter controls above the table. Click **Export CSV** to download the full filtered list.
+At the bottom of the Results page, a full list of all events used in the analysis is shown, including one row per monthly loan payment for each amortizing liability. It is paginated (25 rows per page) and can be filtered by event name (text search), category, and type.
+
+Columns: **Month** (when the event occurs), **Name**, **Category**, **Type**, **Amount**, **Cash Flow** (actual impact on the cash accumulator), and an **Edit** button. The Cash Flow column accounts for asset routing — events sent to or paid from an asset show `—` rather than a misleading cash impact.
+
+Click **Edit** on any row to open the override modal for that event, or to create a pre-filled override for a Loan Payment row. Click **Export CSV** to download the full list.
 
 ---
 

@@ -293,11 +293,31 @@ Each row in the Annual/Monthly Detail table has a chevron (▶/▼) and is click
 - Each event row has an **Edit** button → `openOverrideEventModal(cfgId, ev.id, month)`
 - An **+ Add Event to this period** button → `openOverrideEventModal(cfgId, null, month)`
 
+In addition to user-defined events, `renderPeriodEvents(periodKey)` also renders **loan payment rows** (`liabEntries`) for each amortizing liability in the primary baseline. These are derived from `run.detResults` liabSnapshots:
+- `payment = (prevBalance − currBalance − extraPrincipal) + interest` — extra principal payments (events with `linkedLiabilityName === l.name`) are subtracted so they appear as separate rows.
+- Rendered with a **neutral badge** ("Loan Payment"), the same column layout as event rows, and an **Edit** button.
+- In **monthly view**: Edit passes the synthetic ID `liab-payment-${liabId}-${periodKey}` → `openOverrideEventModal` finds it in `_evTableData` and opens "Edit Analysis Event" pre-filled as an expense.
+- In **yearly view**: Edit passes `''` (empty string, falsy) → opens "Add Analysis Event" for the year's start month.
+- `effectiveEvents` (the array passed to `getEventsForPeriod`) filters out `type === 'loan_payment'` entries so synthetic table entries are never double-processed.
+
 `getEventsForPeriod(periodKey, viewMode, events, cfg)` computes the period event list with inflation-adjusted amounts and cash-flow signs.
+
+**`calcCF` in `getEventsForPeriod`** — returns the actual impact on the `cashFlow` accumulator:
+- Returns `0` for income/one_time_inflow with `depositToAssetName` set (money goes to asset, not cashFlow).
+- Returns `0` for expense/one_time_outflow with `payFromAssetName` set (money comes from asset, not cashFlow).
+- Returns `0` for expense/one_time_outflow that are transfers (`linkedAssetName` or `linkedLiabilityName`).
+- Otherwise: income → `amount * (1 - taxRate/100)`, one_time_inflow → `amount`, expense/outflow → `-amount`.
 
 ### Override Event Modal
 
 `openOverrideEventModal(cfgId, existingId, defaultMonth)` — opens a modal to edit or create an event scoped to a specific analysis config. Saves result to `cfg.eventOverrides`. After saving, calls `markResultsStale()` to show the stale warning banner. Does **not** touch `state.data.events`.
+
+Event lookup order for `existingId`:
+1. `cfg.eventOverrides` (analysis-specific overrides)
+2. `state.data.events` (global events)
+3. `_evTableData` (synthetic entries, e.g. loan payment rows)
+
+When `existingId` resolves to a synthetic `loan_payment` entry in `_evTableData`, the entry is remapped to `type: 'expense', isRecurring: false, endDate: ''` before pre-populating the form, since `loan_payment` is not a user-editable type. The modal title shows "Edit Analysis Event" when any lookup succeeds, "Add Analysis Event" when `existingId` is null or unresolved.
 
 `onOevTypeChange()` / `onOevRecChange()` — toggle visibility of conditional fields inside the override modal (same pattern as `onEvTypeChange` / `onEvRecChange`).
 
@@ -308,13 +328,39 @@ Each row in the Annual/Monthly Detail table has a chevron (▶/▼) and is click
 ### All Analysis Events Table
 
 `renderEventsTableSection()` — renders the paginated, filterable events table at the bottom of the Results page into `<div id="ev-table-section">`. Module-level state:
-- `_evTableData` — populated from `resolveEffectiveEvents(cfg)` at render time
+- `_evTableData` — built in `renderResults`: starts as `resolveEffectiveEvents(cfg)`, then synthetic `loan_payment` entries are appended (one per month per amortizing liability)
 - `_evTablePage` — current page index (0-based)
 - `_evTableCatFilter`, `_evTableTypeFilter` — `Set` of active filter values
 - `_evTableNameFilter` — text search string
 - `EV_PAGE_SIZE = 25`
 
+**Synthetic loan payment entries** — each has:
+```js
+{
+  id: `liab-payment-${l.id}-${month}`,  // unique per liability per month
+  name: l.name,
+  category: l.category ?? 'Liability',
+  type: 'loan_payment',                  // synthetic type; never persisted
+  amount: payment,                       // computed from liabSnapshots delta + interest
+  startDate: month,
+  isRecurring: false,
+  inflationAdjusted: false,
+  _liabId: l.id,                         // used by calcRowCF to look up paymentAssetName
+}
+```
+Payment = `(prevBalance − currBalance − extraPrincipal) + interest`. Extra principal payments (user events with `linkedLiabilityName === l.name` active that month) are pre-subtracted so they don't inflate the loan payment row. User events are captured in `userEvents = _evTableData.slice()` before the loop begins.
+
+**Table columns**: Month · Name · Category · Type · Amount · Cash Flow · Edit (no Start/End/Recurring/InflationAdj columns).
+
+**`calcRowCF(e)`** — mirrors the engine's actual cashFlow impact:
+- `loan_payment`: `−amount` unless `l.paymentAssetName` is set (then `0`); liability found via `_liabId`.
+- Other types: same rules as `calcCF` in `getEventsForPeriod` (transfers, asset routing → `0`).
+
+**Edit button**: calls `openOverrideEventModal(cfg.id, e.id, e.startDate)` for all rows. For loan payment rows this resolves via `_evTableData` fallback and opens "Edit Analysis Event" pre-filled as an expense.
+
 Filter dropdowns use `.ev-filter-dropdown` (absolute-positioned, `z-index:50`). `toggleEvFilterDD(id)` shows one and hides others. `_refreshEvTable()` re-renders just the `#ev-table-section` innerHTML without navigating.
+
+`typeLabel` and `badgeClass` in both `renderResults` and `renderEventsTableSection` map `'loan_payment'` → `'Loan Payment'` / `'neutral'` badge.
 
 ---
 

@@ -2078,6 +2078,10 @@ function getEventsForPeriod(periodKey, viewMode, events, cfg) {
     const isTransfer = (ev.type === 'expense' || ev.type === 'one_time_outflow')
       && (ev.linkedAssetName || ev.linkedLiabilityName);
     if (isTransfer) return 0;
+    // Money routed to an asset doesn't change the cashFlow accumulator
+    if ((ev.type === 'income' || ev.type === 'one_time_inflow') && ev.depositToAssetName) return 0;
+    // Money paid from an asset doesn't change the cashFlow accumulator
+    if ((ev.type === 'expense' || ev.type === 'one_time_outflow') && ev.payFromAssetName) return 0;
     if (ev.type === 'income') return amount * (1 - taxRate / 100);
     if (ev.type === 'one_time_inflow') return amount;
     return -amount; // expense / one_time_outflow
@@ -2180,10 +2184,17 @@ function openOverrideEventModal(cfgId, existingId, defaultMonth) {
   const cfg = state.data.analysisConfigs.find(c => c.id === cfgId);
   if (!cfg) return;
 
-  // Find existing override first, then fall back to global event
+  // Find existing override first, then fall back to global event, then synthetic table entries
   const existingOverride = existingId ? (cfg.eventOverrides ?? []).find(e => e.id === existingId) : null;
   const existingGlobal   = existingId ? state.data.events.find(e => e.id === existingId) : null;
-  const existing = existingOverride ?? existingGlobal;
+  const existingTable    = existingId ? _evTableData.find(e => e.id === existingId) : null;
+  let existing = existingOverride ?? existingGlobal;
+  // Synthetic loan_payment entries: remap to expense so they're editable in the modal
+  if (!existing && existingTable) {
+    existing = existingTable.type === 'loan_payment'
+      ? { ...existingTable, type: 'expense', isRecurring: false, endDate: '' }
+      : { ...existingTable };
+  }
   const ev = existing ? { ...existing } : { ...defaultEvent(), startDate: defaultMonth ?? today() };
 
   const allAssetNames = [...new Set(
@@ -2332,8 +2343,27 @@ let _evTableData = []; // populated by renderResults
 const EV_PAGE_SIZE = 25;
 
 function renderEventsTableSection() {
-  const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out' }[t] ?? t);
-  const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time' }[t] ?? '');
+  const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out', loan_payment: 'Loan Payment' }[t] ?? t);
+  const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time', loan_payment: 'neutral' }[t] ?? '');
+
+  const cfg = state.lastRunConfig;
+  const taxRate = cfg?.taxRate ?? 0;
+  const bl = cfg ? state.data.baselines.find(b => b.id === cfg.baselineId) : null;
+
+  const calcRowCF = (e) => {
+    if (e.type === 'loan_payment') {
+      const liab = bl?.liabilities?.find(l => l.id === e._liabId);
+      return liab?.paymentAssetName ? 0 : -e.amount;
+    }
+    const isTransfer = (e.type === 'expense' || e.type === 'one_time_outflow')
+      && (e.linkedAssetName || e.linkedLiabilityName);
+    if (isTransfer) return 0;
+    if ((e.type === 'income' || e.type === 'one_time_inflow') && e.depositToAssetName) return 0;
+    if ((e.type === 'expense' || e.type === 'one_time_outflow') && e.payFromAssetName) return 0;
+    if (e.type === 'income') return e.amount * (1 - taxRate / 100);
+    if (e.type === 'one_time_inflow') return e.amount;
+    return -e.amount;
+  };
 
   const allCats  = [...new Set(_evTableData.map(e => e.category))].sort();
   const allTypes = [...new Set(_evTableData.map(e => e.type))].sort();
@@ -2352,16 +2382,21 @@ function renderEventsTableSection() {
   const catDD = allCats.map(c => `<label class="ev-filter-item"><input type="checkbox" ${_evTableCatFilter.has(c) ? 'checked' : ''} onchange="evTableFilter('cat','${esc(c)}',this.checked)"> ${esc(c)}</label>`).join('');
   const typeDD = allTypes.map(t => `<label class="ev-filter-item"><input type="checkbox" ${_evTableTypeFilter.has(t) ? 'checked' : ''} onchange="evTableFilter('type','${esc(t)}',this.checked)"> ${typeLabel(t)}</label>`).join('');
 
-  const rows = pageData.map(e => `<tr>
-    <td><strong>${esc(e.name)}</strong>${e.notes ? `<br><span class="text-muted" style="font-size:11px;">${esc(e.notes)}</span>` : ''}</td>
-    <td class="text-muted">${esc(e.category)}</td>
-    <td><span class="badge ${badgeClass(e.type)}">${typeLabel(e.type)}</span></td>
-    <td class="text-right font-mono">${fmt$(e.amount)}</td>
-    <td class="nowrap" style="font-size:12px;">${monthLabel(e.startDate)}</td>
-    <td class="nowrap" style="font-size:12px;">${e.endDate ? monthLabel(e.endDate) : (e.isRecurring ? 'Ongoing' : '—')}</td>
-    <td>${e.isRecurring && e.type !== 'one_time_inflow' && e.type !== 'one_time_outflow' ? '✓' : '<span class="text-muted">—</span>'}</td>
-    <td>${e.inflationAdjusted ? '✓' : '<span class="text-muted">—</span>'}</td>
-  </tr>`).join('');
+  const rows = pageData.map(e => {
+    const cfAmount = calcRowCF(e);
+    const cfClass = cfAmount > 0 ? 'text-positive' : cfAmount < 0 ? 'text-negative' : 'text-muted';
+    const cfStr   = cfAmount === 0 ? '—' : (cfAmount > 0 ? '+' : '') + fmt$(cfAmount);
+    const editAction = `openOverrideEventModal('${esc(cfg?.id ?? '')}','${esc(e.id)}','${esc(e.startDate)}')`;
+    return `<tr>
+      <td class="nowrap" style="font-size:12px;">${monthLabel(e.startDate)}</td>
+      <td><strong>${esc(e.name)}</strong></td>
+      <td class="text-muted">${esc(e.category)}</td>
+      <td><span class="badge ${badgeClass(e.type)}">${typeLabel(e.type)}</span></td>
+      <td class="text-right font-mono">${fmt$(e.amount)}</td>
+      <td class="text-right font-mono ${cfClass}">${cfStr}</td>
+      <td><button class="btn btn-sm btn-ghost" onclick="${editAction}">Edit</button></td>
+    </tr>`;
+  }).join('');
 
   const pagerHtml = totalPages > 1 ? `
     <div class="flex items-center gap-2 mt-3" style="font-size:13px;">
@@ -2393,9 +2428,10 @@ function renderEventsTableSection() {
     <div class="result-table-wrap">
       <table>
         <thead><tr>
-          <th>Name</th><th>Category</th><th>Type</th>
+          <th>Month</th><th>Name</th><th>Category</th><th>Type</th>
           <th class="text-right">Amount</th>
-          <th>Start</th><th>End</th><th>Recurring</th><th>Inflation Adj.</th>
+          <th class="text-right">Cash Flow</th>
+          <th></th>
         </tr></thead>
         <tbody id="ev-table-body">${rows}</tbody>
       </table>
@@ -2444,11 +2480,25 @@ function _refreshEvTable() {
 }
 
 function exportEventsCSV() {
-  const rows = [['Name','Category','Type','Amount','StdDev','StartDate','EndDate','Recurring','InflationAdj','Notes']];
+  const cfg = state.lastRunConfig;
+  const taxRate = cfg?.taxRate ?? 0;
+  const bl = cfg ? state.data.baselines.find(b => b.id === cfg.baselineId) : null;
+  const calcRowCF = (e) => {
+    if (e.type === 'loan_payment') {
+      const liab = bl?.liabilities?.find(l => l.id === e._liabId);
+      return liab?.paymentAssetName ? 0 : -e.amount;
+    }
+    const isTransfer = (e.type === 'expense' || e.type === 'one_time_outflow') && (e.linkedAssetName || e.linkedLiabilityName);
+    if (isTransfer) return 0;
+    if ((e.type === 'income' || e.type === 'one_time_inflow') && e.depositToAssetName) return 0;
+    if ((e.type === 'expense' || e.type === 'one_time_outflow') && e.payFromAssetName) return 0;
+    if (e.type === 'income') return e.amount * (1 - taxRate / 100);
+    if (e.type === 'one_time_inflow') return e.amount;
+    return -e.amount;
+  };
+  const rows = [['Name','Category','Type','Amount','CashFlow','Month']];
   for (const e of _evTableData) {
-    rows.push([e.name, e.category, e.type, e.amount, e.stdDevAmount ?? 0,
-      e.startDate, e.endDate ?? '', e.isRecurring ? 'Yes' : 'No',
-      e.inflationAdjusted ? 'Yes' : 'No', e.notes ?? '']);
+    rows.push([e.name, e.category, e.type, e.amount, calcRowCF(e), e.startDate]);
   }
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -2490,16 +2540,105 @@ function renderResults() {
 
   // Populate events table data before rendering
   _evTableData = resolveEffectiveEvents(cfg);
+
+  // Append one synthetic loan-payment entry per month per amortizing liability.
+  // Pre-capture user events before synthetics are added for extra-principal lookup.
+  if (pBl && run.detResults) {
+    const userEvents = _evTableData.slice();
+    for (const l of (pBl.liabilities ?? [])) {
+      if (!l.useAmortization) continue;
+      for (let i = 0; i < run.detResults.length; i++) {
+        const currResult = run.detResults[i];
+        const prevResult = i > 0 ? run.detResults[i - 1] : null;
+        const month = currResult.month;
+        const currBalance = currResult.liabSnapshots?.find(s => s.id === l.id)?.value ?? 0;
+        const prevBalance = prevResult
+          ? (prevResult.liabSnapshots?.find(s => s.id === l.id)?.value ?? l.value)
+          : l.value;
+        if (prevBalance <= 0) continue;
+        const effectiveRate = (l.termEndDate && month > l.termEndDate && (l.renewalRate ?? 0) > 0)
+          ? l.renewalRate : (l.annualInterestRate ?? 0);
+        const interest = prevBalance * effectiveRate / 12 / 100;
+        // Exclude extra principal payments from events so they stay as separate rows
+        const extraPrincipal = userEvents
+          .filter(ev => ev.linkedLiabilityName === l.name && isEventActive(ev, month))
+          .reduce((s, ev) => s + (ev.amount ?? 0), 0);
+        const payment = Math.max(0, (prevBalance - currBalance - extraPrincipal) + interest);
+        if (payment <= 0) continue;
+        _evTableData.push({
+          id: `liab-payment-${l.id}-${month}`,
+          name: l.name,
+          category: l.category ?? 'Liability',
+          type: 'loan_payment',
+          amount: payment,
+          startDate: month,
+          isRecurring: false,
+          inflationAdjusted: false,
+          _liabId: l.id,
+        });
+      }
+    }
+  }
   _evTablePage = 0;
 
   const numCols = 12 + (cmp ? 1 : 0) + (mc ? 3 : 0);
-  const effectiveEvents = _evTableData;
-  const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out' }[t] ?? t);
-  const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time' }[t] ?? '');
+  // Exclude synthetic loan_payment entries from event processing — they're handled by liabEntries
+  const effectiveEvents = _evTableData.filter(e => e.type !== 'loan_payment');
+  const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out', loan_payment: 'Loan Payment' }[t] ?? t);
+  const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time', loan_payment: 'neutral' }[t] ?? '');
 
   const renderPeriodEvents = (periodKey) => {
     const periodEvs = getEventsForPeriod(periodKey, vm, effectiveEvents, cfg);
-    if (!periodEvs.length) {
+
+    // Build amortizing liability payment rows from the last run's snapshots.
+    // Extra principal payments (events with linkedLiabilityName) are excluded here —
+    // they already appear as separate event rows above.
+    const liabEntries = [];
+    const detMonthly = run.detResults; // always the monthly array
+    if (pBl && detMonthly) {
+      for (const l of (pBl.liabilities ?? [])) {
+        if (!l.useAmortization) continue;
+        const months = vm === 'monthly'
+          ? [periodKey]
+          : Array.from({ length: 12 }, (_, i) => `${periodKey}-${String(i + 1).padStart(2, '0')}`)
+              .filter(m => m >= cfg.startDate && m <= cfg.endDate);
+        let totalPayment = 0;
+        let totalCF = 0;
+        for (const month of months) {
+          const currIdx = detMonthly.findIndex(r => r.month === month);
+          if (currIdx < 0) continue;
+          const currResult = detMonthly[currIdx];
+          const prevResult = currIdx > 0 ? detMonthly[currIdx - 1] : null;
+          const currBalance = currResult.liabSnapshots?.find(s => s.id === l.id)?.value ?? 0;
+          const prevBalance = prevResult
+            ? (prevResult.liabSnapshots?.find(s => s.id === l.id)?.value ?? l.value)
+            : l.value;
+          if (prevBalance <= 0) continue;
+          const effectiveRate = (l.termEndDate && month > l.termEndDate && (l.renewalRate ?? 0) > 0)
+            ? l.renewalRate : (l.annualInterestRate ?? 0);
+          const interest = prevBalance * effectiveRate / 12 / 100;
+          // Exclude extra principal payments made by events in this month
+          const extraPrincipal = effectiveEvents
+            .filter(ev => ev.linkedLiabilityName === l.name && isEventActive(ev, month))
+            .reduce((s, ev) => {
+              let amt = ev.amount ?? 0;
+              if (ev.inflationAdjusted && cfg.inflationRate) {
+                amt *= Math.pow(1 + cfg.inflationRate / 12 / 100, monthsBetween(cfg.startDate, month));
+              }
+              return s + amt;
+            }, 0);
+          const payment = Math.max(0, (prevBalance - currBalance - extraPrincipal) + interest);
+          if (payment <= 0) continue;
+          totalPayment += payment;
+          if (!l.paymentAssetName) totalCF -= payment;
+        }
+        if (totalPayment > 0) {
+          liabEntries.push({ liabId: l.id, name: l.name, category: l.category ?? 'Liability', payment: totalPayment, cfAmount: totalCF });
+        }
+      }
+    }
+
+    if (!periodEvs.length && !liabEntries.length) {
       return `<div style="padding:8px 16px 12px;font-size:13px;color:var(--text-muted);">No events in this period.
         <button class="btn btn-sm btn-ghost" style="margin-left:8px;" onclick="openOverrideEventModal('${esc(cfg.id)}',null,'${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">+ Add Event</button>
       </div>`;
@@ -2514,6 +2653,16 @@ function renderResults() {
         <button class="btn btn-sm btn-ghost" onclick="openOverrideEventModal('${esc(cfg.id)}','${esc(ev.id)}','${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">Edit</button>
       </td>
     </tr>`).join('');
+    const liabRows = liabEntries.map(({ liabId, name, category, payment, cfAmount }) => `<tr>
+      <td style="padding:5px 8px;">${esc(name)}</td>
+      <td style="padding:5px 8px;" class="text-muted">${esc(category)}</td>
+      <td style="padding:5px 8px;"><span class="badge ${badgeClass('loan_payment')}">${typeLabel('loan_payment')}</span></td>
+      <td style="padding:5px 8px;" class="text-right font-mono">${fmt$(payment)}</td>
+      <td style="padding:5px 8px;" class="text-right font-mono ${cfAmount < 0 ? 'text-negative' : 'text-muted'}">${cfAmount === 0 ? '—' : fmt$(cfAmount)}</td>
+      <td style="padding:5px 8px;">
+        <button class="btn btn-sm btn-ghost" onclick="openOverrideEventModal('${esc(cfg.id)}','${vm === 'monthly' ? `liab-payment-${esc(liabId)}-${esc(periodKey)}` : ''}','${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">Edit</button>
+      </td>
+    </tr>`).join('');
     return `<div style="padding:6px 12px 12px;">
       <table style="font-size:12.5px;width:100%;border-collapse:collapse;">
         <thead><tr style="border-bottom:1px solid var(--border);">
@@ -2524,7 +2673,7 @@ function renderResults() {
           <th style="padding:5px 8px;text-align:right;font-weight:600;">Cash Flow</th>
           <th></th>
         </tr></thead>
-        <tbody>${evRows}</tbody>
+        <tbody>${evRows}${liabRows}</tbody>
       </table>
       <button class="btn btn-sm btn-ghost" style="margin-top:6px;font-size:12px;" onclick="openOverrideEventModal('${esc(cfg.id)}',null,'${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">+ Add Event to this period</button>
     </div>`;
