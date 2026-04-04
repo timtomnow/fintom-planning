@@ -1,6 +1,6 @@
 # FinTom — Codebase Guide for Claude
 
-This is a self-contained, single-page financial planning app. No framework, no build step, no npm. Four files: `index.html`, `styles.css`, `app.js`, `README.txt`. Runs by opening `index.html` in any browser. Chart.js loaded from CDN (internet required). Data persisted to `localStorage`.
+This is a self-contained, single-page financial planning app. No framework, no build step, no npm. Four files: `index.html`, `styles.css`, `app.js`, `README.md`. Runs by opening `index.html` in any browser. Chart.js and marked.js loaded from CDN (internet required). Data persisted to `localStorage`.
 
 ---
 
@@ -8,10 +8,10 @@ This is a self-contained, single-page financial planning app. No framework, no b
 
 | File | Purpose |
 |---|---|
-| `index.html` | Shell. Loads Chart.js CDN, marked.js CDN, `styles.css`, `app.js`. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. |
+| `index.html` | Shell. Loads Chart.js CDN, marked.js CDN, `styles.css`, `app.js`. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. Also embeds doc content in `script[type="text/x-markdown"]` tags (`#doc-readme`, `#doc-claude`) for the in-app help modal. |
 | `styles.css` | Full design system. CSS variables in `:root`. No external dependencies. |
-| `app.js` | Everything else — state, data, forecast engine, Monte Carlo, all page renders, charts, modals, routing. Also embeds `README_MD` and `CLAUDE_MD_CONTENT` as string constants for the in-app help modal. |
-| `README.md` | End-user instructions (Markdown). Replaces README.txt. |
+| `app.js` | Everything else — state, data, forecast engine, Monte Carlo, all page renders, charts, modals, routing, help modal. |
+| `README.md` | End-user instructions (Markdown). |
 
 ---
 
@@ -46,6 +46,7 @@ Destroys active charts, sets `state.page` / `state.params`, updates sidebar acti
 
 Sub-pages that don't have their own sidebar item are mapped in `SIDEBAR_MAP`:
 - `'baseline-detail'` highlights `'baselines'`
+- `'event-set-detail'` highlights `'event-sets'`
 - `'results'` highlights `'analysis'`
 
 ---
@@ -61,10 +62,13 @@ All data lives in `state.data` and is saved as a single JSON blob to `localStora
   version: 1,
   baselines: Baseline[],
   events: Event[],
+  eventSets: EventSet[],
   analysisConfigs: AnalysisConfig[],
   settings: { defaultInflationRate: 3, defaultTaxRate: 22 },
 }
 ```
+
+Older saves without `eventSets` are migrated on load: `state.data.eventSets = state.data.eventSets ?? []`.
 
 ### Baseline
 
@@ -134,19 +138,32 @@ One-time events: `isRecurring = false`, active only in the month matching `start
 
 Income events have tax applied: `amount * (1 - taxRate/100)`.
 
-`linkedAssetName` — only meaningful on `expense` and `one_time_outflow` types. When set, the engine both deducts the amount from `cashFlow` (normal expense behaviour) AND adds the same amount to the named asset's value. This models a savings transfer — net worth change is zero. The asset is matched by name in the current baseline's cloned assets array. If no match is found the linkage is silently skipped.
+`linkedAssetName` — only meaningful on `expense` and `one_time_outflow` types. When set and the named asset is found, the engine deducts the amount from `cashFlow` AND adds it to the asset's value (NW-neutral transfer). The amount counts as `transferThisMonth`, not `expenseThisMonth`. If the named asset is not found, the linkage is silently skipped and the amount counts as a normal expense.
+
+### EventSet
+
+```js
+{
+  id, name, description,
+  eventIds: string[],  // IDs of Event records belonging to this set
+}
+```
+
+Event sets are named collections of events attached to a specific analysis config. `resolveEventSets(ids)` takes an array of EventSet IDs and returns the merged flat array of Event objects (global events + all events referenced by the sets). When an event is deleted it is automatically removed from all sets that reference it.
 
 ### AnalysisConfig
 
 ```js
 {
   id, name,
-  baselineId,         // primary baseline (starting point)
-  compareBaselineId,  // optional; second baseline for scenario comparison
-  startDate, endDate, // 'YYYY-MM'
-  viewMode,           // 'monthly' | 'yearly' — affects results display only
-  inflationRate,      // %/yr
-  taxRate,            // % on income events
+  baselineId,            // primary baseline (starting point)
+  compareBaselineId,     // optional; second baseline for scenario comparison
+  eventSetIds: [],       // EventSet IDs merged into the primary forecast
+  compareEventSetIds: [], // EventSet IDs merged into the compare forecast
+  startDate, endDate,    // 'YYYY-MM'
+  viewMode,              // 'monthly' | 'yearly' — affects results display only
+  inflationRate,         // %/yr
+  taxRate,               // % on income events
   monteCarlo: {
     enabled,
     numSimulations,           // typically 500–1000
@@ -159,27 +176,27 @@ Income events have tax applied: `amount * (1 - taxRate/100)`.
 
 ## Forecast Engine
 
-### `runSingleForecast(baselineId, config, returnSampler, amountSampler)`
+### `runSingleForecast(baselineId, config, returnSampler, amountSampler, events = null)`
 
 Core engine. Deep-clones baseline assets/liabilities (never mutates `state.data`), builds a `Map<name, asset>` for fast lookup, then iterates month by month:
 
 1. **Capture start NW** — `sum(assets) + cashFlow - sum(liabilities)` before any mutation (stored as `startNetWorth`).
 2. **Grow assets** — non-investment: `value *= (1 + monthlyGrowthRate/100)`. Investment: `value *= (1 + annualReturn/12/100)` where `annualReturn` comes from `returnSampler(asset)` if provided (MC mode) or `asset.annualMeanReturn` (deterministic). Values clamped to ≥ 0.
 3. **Amortise liabilities** — for each liability with `useAmortization`, compute monthly interest, reduce balance by principal, deduct payment from `paymentAssetName` asset's value (if set and found) or from `cashFlow`. Adds payment to `expenseThisMonth`.
-4. **Apply events** — `isEventActive(event, month)` gates each event. Inflation adjustment compounds from `config.startDate`. Income multiplied by `(1 - taxRate/100)`, added to both `cashFlow` and `incomeThisMonth`. Expenses deducted from `cashFlow` and added to `expenseThisMonth`; if `linkedAssetName` is set, also adds amount to that asset's value. One-time inflows/outflows follow the same income/expense pattern.
+4. **Apply events** — uses the `events` array if provided, otherwise falls back to `state.data.events`. `isEventActive(event, month)` gates each event. Inflation adjustment compounds from `config.startDate`. Income multiplied by `(1 - taxRate/100)`, added to both `cashFlow` and `incomeThisMonth`. Expenses deducted from `cashFlow`; if `linkedAssetName` resolves to an asset, the amount also adds to that asset's value and goes to `transferThisMonth` (not `expenseThisMonth`); if the asset is not found it falls back to `expenseThisMonth`. One-time inflows/outflows follow the same pattern.
 5. **Compute net worth** — `netWorth = sum(assets) + cashFlow - sum(liabilities)`. `liquidNetWorth` uses only `isLiquid` assets minus only liabilities with `includeInLiquidNW === true`.
 
 Returns an array of monthly result objects:
 ```js
 { month, netWorth, liquidNetWorth, assetTotal, liabTotal, cashFlow,
-  startNetWorth, incomeThisMonth, expenseThisMonth }
+  startNetWorth, incomeThisMonth, expenseThisMonth, transferThisMonth }
 ```
 
-### `runDeterministicForecast(baselineId, config)`
+### `runDeterministicForecast(baselineId, config, events = null)`
 
 Calls `runSingleForecast` with no samplers.
 
-### `runMonteCarloForecast(baselineId, config, mcConfig)`
+### `runMonteCarloForecast(baselineId, config, mcConfig, events = null)`
 
 Runs `runSingleForecast` N times. Each simulation uses:
 - `returnSampler`: draws `annualReturn` from `Normal(asset.annualMeanReturn, asset.annualStdDev)` using Box-Muller
@@ -194,7 +211,7 @@ Collects net worth values per time step across all simulations, then computes p1
 
 `aggregateYearly(monthly)` reduces monthly arrays to one row per calendar year:
 - **Balance-sheet fields** (`netWorth`, `liquidNetWorth`, `assetTotal`, `liabTotal`, `cashFlow`, `month`): last month of the year wins.
-- **Flow fields** (`incomeThisMonth`, `expenseThisMonth`): **summed** across all months in the year.
+- **Flow fields** (`incomeThisMonth`, `expenseThisMonth`, `transferThisMonth`): **summed** across all months in the year.
 - `startNetWorth`: the **first** month of the year's value (captured at init of each year key).
 
 `aggregateMCYearly(monthly)` uses the same last-wins logic for percentile fields. It does not handle flow fields (Monte Carlo only tracks net worth percentiles).
@@ -217,7 +234,7 @@ All Chart.js instances are pushed to `state.activeCharts` and destroyed via `des
 
 ### Cash Flow Chart (`chart-cf`)
 
-Simple line chart of `cashFlow` (cumulative net cash) over time, fill to origin.
+Simple line chart of the engine `cashFlow` accumulator over time, fill to origin.
 
 ---
 
@@ -229,7 +246,7 @@ Simple line chart of `cashFlow` (cumulative net cash) over time, fill to origin.
 
 `showConfirm(title, msg, onConfirm, confirmLabel)` — destructive action variant.
 
-`hideModal()` — removes `open` class. Also triggered by clicking the overlay backdrop.
+`hideModal()` — removes `open` class and `modal-wide` class. Also triggered by clicking the overlay backdrop.
 
 All modal form fields use plain DOM reads (`document.getElementById(...).value`) inside the `onSave` callback.
 
@@ -247,9 +264,7 @@ All dates stored as `'YYYY-MM'` strings. `monthLabel('2026-04')` → `'Apr 2026'
 
 ### Help Modal
 
-`showHelpModal(tab)` — opens a wide modal (`modal-wide` class, 760px) with two tabs: **User Guide** (renders `README_MD` constant) and **Developer Guide** (renders `CLAUDE_MD_CONTENT` constant). Both constants are declared at the top of `app.js` as template literals containing the full markdown content of each file.
-
-Rendering uses `marked.parse()` (marked.js loaded from CDN in `index.html`). Falls back to `<pre>` display if marked is unavailable.
+`showHelpModal(tab)` — opens a wide modal (`modal-wide` class, 760px) with two tabs: **User Guide** and **Developer Guide**. Content is read from `script[type="text/x-markdown"]` elements in `index.html` (`#doc-readme` and `#doc-claude`) and rendered with `marked.parse()`. Falls back to `<pre>` display if marked is unavailable.
 
 `switchHelpTab(tab)` — toggles visibility of `#help-readme` / `#help-claude` divs and updates `.active` class on the tab buttons.
 
@@ -282,5 +297,5 @@ STORAGE_KEY = 'fp_v1'
 ASSET_CATEGORIES      // array of strings
 LIABILITY_CATEGORIES  // array of strings
 EVENT_CATEGORIES      // array of strings
-SIDEBAR_MAP           // { 'baseline-detail': 'baselines', 'results': 'analysis' }
+SIDEBAR_MAP           // { 'baseline-detail': 'baselines', 'event-set-detail': 'event-sets', 'results': 'analysis' }
 ```
