@@ -1,6 +1,6 @@
 # FinTom — Codebase Guide for Claude
 
-This is a self-contained, single-page financial planning app. No framework, no build step, no npm. Four files: `index.html`, `styles.css`, `app.js`, `README.md`. Runs by opening `index.html` in any browser. Chart.js and marked.js loaded from CDN (internet required). Data persisted to `localStorage`.
+This is a self-contained, single-page financial planning app. No framework, no build step, no npm. Runs by opening `index.html` in any browser. Chart.js and marked.js loaded from CDN (internet required). Data persisted to `localStorage`.
 
 ---
 
@@ -8,10 +8,29 @@ This is a self-contained, single-page financial planning app. No framework, no b
 
 | File | Purpose |
 |---|---|
-| `index.html` | Shell. Loads Chart.js CDN, marked.js CDN, `styles.css`, `app.js`. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. |
+| `index.html` | Shell. Loads Chart.js CDN, marked.js CDN, `styles.css`, and all JS files in order. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. |
 | `styles.css` | Full design system. CSS variables in `:root`. No external dependencies. |
-| `app.js` | Everything else — state, data, forecast engine, Monte Carlo, all page renders, charts, modals, routing, help modal. |
+| `js/utils.js` | Pure utility functions — uuid, date math, formatters (fmt$, fmtCompact, fmtPct), esc, deepClone, sampleNormal, pctValue, isEventActive. No state dependencies. |
+| `js/data.js` | Constants (STORAGE_KEY, ASSET_CATEGORIES, etc., SIDEBAR_MAP), state object, default-record factories (defaultData, defaultAsset, etc.), storage (loadData, saveData, exportData, triggerImport). |
+| `js/engine.js` | Forecast engine — runSingleForecast, runDeterministicForecast, runMonteCarloForecast, aggregateYearly, aggregateMCYearly. Reads state; no DOM. |
+| `js/ui.js` | Shared UI infrastructure — chart helpers (destroyCharts, makeChart), modals (showModal, showConfirm, hideModal, showHelpModal, switchHelpTab), showToast, navigate, buildSidebar, DOMContentLoaded init. |
+| `js/pages/dashboard.js` | renderDashboard. |
+| `js/pages/baselines.js` | renderBaselines, renderBaselineDetail, openBaselineModal, duplicateBaseline, deleteBaseline, openAssetModal, toggleInvestFields, deleteAsset, openLiabilityModal, toggleAmortFields, onPayModeChange, deleteLiability. |
+| `js/pages/events.js` | renderEvents, openEventModal, onEvTypeChange, onEvRecChange, deleteEvent, renderEventSets, renderEventSetDetail, openEventSetModal, openEventSetEventsModal, removeEventFromSet, deleteEventSet. |
+| `js/pages/analysis.js` | renderAnalysis, openConfigModal, toggleMCFields, deleteConfig, resolveEventSets, resolveEffectiveEvents, getEventsForPeriod, runAndView. |
+| `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, renderEventsTableSection, etc.), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt. |
+| `js/pages/settings.js` | renderSettings, saveSettings, confirmClear. |
 | `README.md` | End-user instructions (Markdown). |
+
+### Script load order in index.html
+
+```
+js/utils.js → js/data.js → js/engine.js → js/ui.js →
+js/pages/dashboard.js → js/pages/baselines.js → js/pages/events.js →
+js/pages/analysis.js → js/pages/results.js → js/pages/settings.js
+```
+
+All files use global scope (no ES modules). Order enforces dependencies. `file://` compatible.
 
 ---
 
@@ -402,10 +421,11 @@ The `?` button is rendered in the sidebar logo area via `buildSidebar()` — it'
 
 ## Adding a New Page
 
-1. Write a `renderFoo()` function returning an HTML string.
-2. Add a `case 'foo':` in the `navigate()` switch.
-3. Add a nav item to the `nav` array in `buildSidebar()` if it needs a sidebar entry.
-4. If it's a sub-page of an existing section, add it to `SIDEBAR_MAP`.
+1. Write a `renderFoo()` function returning an HTML string — put it in a new `js/pages/foo.js` or add it to the most related existing page file.
+2. Add a `case 'foo':` in the `navigate()` switch in `js/ui.js`.
+3. Add a nav item to the `nav` array in `buildSidebar()` in `js/ui.js` if it needs a sidebar entry.
+4. If it's a sub-page of an existing section, add it to `SIDEBAR_MAP` in `js/data.js`.
+5. If a new file was created, add a `<script src="js/pages/foo.js"></script>` tag to `index.html` (before `js/ui.js` is not needed, but after `js/ui.js` is fine — pages depend on ui, not the reverse).
 
 ## Adding a New Field to a Data Model
 
@@ -430,7 +450,7 @@ SIDEBAR_MAP           // { 'baseline-detail': 'baselines', 'event-set-detail': '
 
 ## Syntax Check Policy
 
-After every edit to `app.js`, visually verify the changed region before considering the task done. There is no build step, so a syntax error produces a blank page with no helpful output.
+After every edit to any JS file, visually verify the changed region before considering the task done. There is no build step, so a syntax error produces a blank page with no helpful output.
 
 Common pitfalls in this codebase:
 - Block-body arrow functions inside template literals (`.map(x => { ... return \`...\`; })`) require a closing `}` before the `)` — easy to drop when building multi-line returns.
