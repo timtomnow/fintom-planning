@@ -48,9 +48,15 @@ Each asset has a name, category, and current value, plus a growth model:
 Each liability has a name, category, current balance, and annual interest rate.
 
 **Amortisation (for mortgages and instalment loans):**
-- Enable the **Amortising loan** toggle and enter the full monthly payment
+- Enable the **Amortising loan** toggle
 - Each month the engine automatically splits the payment into principal and interest, reduces the balance, and deducts the payment from cash flow (or from a Payment Source Asset — see below)
 - **Do NOT** also create an expense event for the same payment — that double-counts it
+
+**Mortgage fields** *(optional — for true mortgage amortization):*
+- **Amortization End Date** — the month/year when the loan is fully paid off (e.g. `2050-01`). When set, the payment is **auto-calculated** each month from the remaining balance, remaining time, and current rate. Leave blank to use a fixed Manual Monthly Payment instead.
+- **Payment Frequency** — how often payments are made: Monthly, Semi-Monthly (2×/month), or Bi-Weekly (26×/year). Bi-Weekly results in slightly faster payoff than monthly due to the extra annual payment.
+- **Term End Date** — when the current interest rate term expires and the mortgage renews (e.g. `2030-01`). After this date the engine automatically switches to the Renewal Rate and recalculates the payment.
+- **Rate at Renewal** — the assumed annual interest rate applied after the term end date.
 
 **Include in Liquid NW:**
 - Checked by default. Uncheck for liabilities tied to illiquid assets (e.g., a mortgage on a home you wouldn't liquidate to pay it off). Unchecked liabilities are excluded from the Liquid Net Worth calculation.
@@ -177,7 +183,7 @@ Below the detail table, a second table shows every asset, liability, and the acc
 Each month the engine:
 
 1. **Grows each asset** — non-investment: `value × (1 + monthlyRate/100)` — investment: `value × (1 + annualReturn/12/100)` where the return is the mean (deterministic) or a sampled value (Monte Carlo)
-2. **Amortises liabilities** — for each amortising loan, splits the payment into principal and interest, reduces the balance, and deducts the payment from the payment source asset (or cash flow if none set)
+2. **Amortises liabilities** — for each amortising loan, determines the effective rate (switches to renewal rate after term end date), auto-calculates the payment from remaining balance and amortization period (or uses the fixed monthly payment if no amortization end date is set), splits it into principal and interest, reduces the balance, and deducts the payment from the payment source asset (or cash flow if none set)
 3. **Applies events** — income after tax goes into the "Deposit into Asset" account if set, otherwise the cash pool; expenses deduct from the "Pay from Asset" account if set, otherwise the cash pool; outflows with "Transfer to Asset" or "Extra Payment to Liability" are NW-neutral and counted as transfers
 4. **Computes net worth** — `Total Assets + Cumulative Cash Flow − Total Liabilities`
 
@@ -189,8 +195,8 @@ Each month the engine:
 
 ## Tips
 
-- For a mortgage: add it as a **liability with amortisation**. Do not add a separate expense event for the payment.
-- Set the **Payment Source Asset** on your mortgage to track your checking account balance accurately.
+- For a mortgage: add it as a **liability with amortisation**. Set the Amortization End Date, Term End Date, and Rate at Renewal to model term renewals automatically. Do not add a separate expense event for the payment.
+- Set the **Payment Source Asset** on your mortgage to track your chequing account balance accurately.
 - For savings contributions: use **Transfer to Asset** on an expense event so your investment account grows from deposits while net worth stays unchanged (it's just moving money).
 - For a paycheck deposited into a brokerage: use **Deposit into Asset** on an income event so the account balance tracks correctly.
 - For a bill paid from a specific account: use **Pay from Asset** on an expense event to track that account's balance declining over time.

@@ -104,14 +104,25 @@ Older saves without `eventSets` are migrated on load: `state.data.eventSets = st
   id, name, value,   // value = current outstanding balance
   category,
   annualInterestRate,
-  useAmortization,   // bool
-  monthlyPayment,    // only relevant when useAmortization = true
-  includeInLiquidNW, // bool (default true) — whether to subtract this liability in liquidNetWorth
-  paymentAssetName,  // string (optional) — name of asset to deduct payment from instead of cashFlow
+  useAmortization,      // bool
+  monthlyPayment,       // used when useAmortization = true AND amortizationEndDate is blank
+  includeInLiquidNW,    // bool (default true) — whether to subtract this liability in liquidNetWorth
+  paymentAssetName,     // string (optional) — name of asset to deduct payment from instead of cashFlow
+  // Mortgage-specific fields (all optional; activate auto-calculation by setting amortizationEndDate)
+  paymentFrequency,     // 'monthly' | 'semi-monthly' | 'bi-weekly' (default 'monthly')
+  amortizationEndDate,  // 'YYYY-MM' — when the loan is fully paid off; triggers auto payment calculation
+  termEndDate,          // 'YYYY-MM' — when the current mortgage term expires
+  renewalRate,          // % annual — rate assumed after termEndDate
 }
 ```
 
-**Important:** When `useAmortization` is true, the forecast engine deducts `monthlyPayment` from `cashFlow` each month (or from `paymentAssetName` asset if set) and reduces the liability balance by the principal portion. The user should NOT also create an expense event for the same payment — that would double-count it.
+**Important:** When `useAmortization` is true, the forecast engine deducts a payment from `cashFlow` each month (or from `paymentAssetName` asset if set) and reduces the liability balance by the principal portion. The user should NOT also create an expense event for the same payment — that would double-count it.
+
+**Auto-calculated payment** — when `amortizationEndDate` is set, the engine calculates the payment each month using the standard amortization formula based on the current balance, effective rate, remaining months, and payment frequency. This means the payment automatically adjusts at term renewal. When `amortizationEndDate` is blank, `monthlyPayment` is used as a fixed amount.
+
+**Term renewal** — when `termEndDate` is set and the current forecast month is past that date, the engine switches from `annualInterestRate` to `renewalRate`. The payment recalculates automatically because it is derived from the balance and remaining amortization period each month.
+
+**Payment frequency** — `paymentFrequency` controls how many payments occur per year (monthly = 12, semi-monthly = 24, bi-weekly = 26). The engine converts to a monthly-equivalent cash outflow using the per-period amortization formula. Bi-weekly produces slightly higher annual payments than monthly (26 vs 24 half-monthly equivalents), which reduces the amortization period.
 
 `includeInLiquidNW` — when false, this liability is excluded from the `liquidNetWorth` calculation. Use for mortgages on illiquid property you would not sell to settle the debt.
 
@@ -193,7 +204,7 @@ Core engine. Deep-clones baseline assets/liabilities (never mutates `state.data`
 
 1. **Capture start NW** — `sum(assets) + cashFlow - sum(liabilities)` before any mutation (stored as `startNetWorth`).
 2. **Grow assets** — non-investment: `value *= (1 + monthlyGrowthRate/100)`. Investment: `value *= (1 + annualReturn/12/100)` where `annualReturn` comes from `returnSampler(asset)` if provided (MC mode) or `asset.annualMeanReturn` (deterministic). Values clamped to ≥ 0.
-3. **Amortise liabilities** — for each liability with `useAmortization`, compute monthly interest, reduce balance by principal, deduct payment from `paymentAssetName` asset's value (if set and found) or from `cashFlow`. Adds payment to `expenseThisMonth`.
+3. **Amortise liabilities** — for each liability with `useAmortization`, determine the effective rate (switches to `renewalRate` after `termEndDate` if set), compute monthly interest, calculate the monthly-equivalent payment (auto-calculated from `amortizationEndDate` + `paymentFrequency` if set, otherwise `monthlyPayment`), reduce balance by the principal portion, deduct payment from `paymentAssetName` asset's value (if set and found) or from `cashFlow`. Adds payment to `expenseThisMonth`. Auto-calculated payment uses the standard amortization formula: `perPeriodPayment = balance * ratePerPeriod / (1 - (1+ratePerPeriod)^(-periodsRemaining))`; monthly equivalent = `perPeriodPayment * freq / 12`.
 4. **Apply events** — uses the `events` array if provided, otherwise falls back to `state.data.events`. `isEventActive(event, month)` gates each event. Inflation adjustment compounds from `config.startDate`. For each active event:
    - **Income / one_time_inflow**: after-tax amount goes to `depositToAssetName` asset's value if set, otherwise to `cashFlow`. Always adds to `incomeThisMonth`.
    - **Expense / one_time_outflow**: amount deducted from `payFromAssetName` asset's value if set, otherwise from `cashFlow`. Then: if `linkedLiabilityName` resolves to a liability, reduces its balance (`transferThisMonth`); else if `linkedAssetName` resolves to an asset, adds to its value (`transferThisMonth`); otherwise `expenseThisMonth`. Unresolved names fall through to `expenseThisMonth`.
@@ -318,6 +329,17 @@ LIABILITY_CATEGORIES  // array of strings
 EVENT_CATEGORIES      // array of strings
 SIDEBAR_MAP           // { 'baseline-detail': 'baselines', 'event-set-detail': 'event-sets', 'results': 'analysis' }
 ```
+
+---
+
+## Syntax Check Policy
+
+After every edit to `app.js`, visually verify the changed region before considering the task done. There is no build step, so a syntax error produces a blank page with no helpful output.
+
+Common pitfalls in this codebase:
+- Block-body arrow functions inside template literals (`.map(x => { ... return \`...\`; })`) require a closing `}` before the `)` — easy to drop when building multi-line returns.
+- Unmatched backticks or braces inside nested template literals.
+- Switching from expression-body (`.map(x => \`...\``) to block-body (`.map(x => { ... })`) without adding both `return` and the closing `}`.
 
 ---
 
