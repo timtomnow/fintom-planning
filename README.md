@@ -52,10 +52,15 @@ Each liability has a name, category, current balance, and annual interest rate.
 - Each month the engine automatically splits the payment into principal and interest, reduces the balance, and deducts the payment from cash flow (or from a Payment Source Asset — see below)
 - **Do NOT** also create an expense event for the same payment — that double-counts it
 
+**Payment Mode** *(choose how the monthly payment is determined):*
+- **Calculated** — the payment is derived automatically each month from the remaining balance, rate, amortization period, and payment frequency. Requires an Amortization End Date.
+- **Set payment** — you specify the exact monthly payment amount. The engine still correctly splits it into principal and interest each month, so the balance amortizes accurately. Use this when you know your actual payment (e.g., `$2,800`) and want the forecast to match.
+
 **Mortgage fields** *(optional — for true mortgage amortization):*
-- **Amortization End Date** — the month/year when the loan is fully paid off (e.g. `2050-01`). When set, the payment is **auto-calculated** each month from the remaining balance, remaining time, and current rate. Leave blank to use a fixed Manual Monthly Payment instead.
-- **Payment Frequency** — how often payments are made: Monthly, Semi-Monthly (2×/month), or Bi-Weekly (26×/year). Bi-Weekly results in slightly faster payoff than monthly due to the extra annual payment.
-- **Term End Date** — when the current interest rate term expires and the mortgage renews (e.g. `2030-01`). After this date the engine automatically switches to the Renewal Rate and recalculates the payment.
+- **Amortization End Date** *(Calculated mode)* — the month/year when the loan is fully paid off (e.g. `2050-01`). Required for Calculated mode.
+- **Payment Frequency** *(Calculated mode)* — how often payments are made: Monthly, Semi-Monthly (2×/month), or Bi-Weekly (26×/year). Bi-Weekly results in slightly faster payoff than monthly due to the extra annual payment.
+- **Term Start Date** *(Calculated mode, optional)* — when the current mortgage term started (e.g. `2025-01`). If set, the amortization period for the payment formula is fixed as the span from this date to the Amortization End Date. This gives a stable payment that closely matches what was agreed at term origination, rather than a payment that drifts down as the balance decreases. After the Term End Date, the period reverts to remaining months so the renewed payment is realistic.
+- **Term End Date** — when the current interest rate term expires and the mortgage renews (e.g. `2030-01`). After this date the engine automatically switches to the Renewal Rate.
 - **Rate at Renewal** — the assumed annual interest rate applied after the term end date.
 
 **Include in Liquid NW:**
@@ -193,7 +198,7 @@ At the bottom of the Results page, a full list of all events used in the analysi
 Each month the engine:
 
 1. **Grows each asset** — non-investment: `value × (1 + monthlyRate/100)` — investment: `value × (1 + annualReturn/12/100)` where the return is the mean (deterministic) or a sampled value (Monte Carlo)
-2. **Amortises liabilities** — for each amortising loan, determines the effective rate (switches to renewal rate after term end date), auto-calculates the payment from remaining balance and amortization period (or uses the fixed monthly payment if no amortization end date is set), splits it into principal and interest, reduces the balance, and deducts the payment from the payment source asset (or cash flow if none set)
+2. **Amortises liabilities** — for each amortising loan, determines the effective rate (switches to renewal rate after term end date), determines the payment based on the Payment Mode: *Calculated* derives the payment from remaining balance, rate, and amortization period (using Term Start Date for a stable period if set); *Set* uses the fixed amount you specified. In both modes the payment is split correctly into principal and interest, the balance is reduced, and the payment is deducted from the payment source asset (or cash flow if none set)
 3. **Applies events** — income after tax goes into the "Deposit into Asset" account if set, otherwise the cash pool; expenses deduct from the "Pay from Asset" account if set, otherwise the cash pool; outflows with "Transfer to Asset" or "Extra Payment to Liability" are NW-neutral and counted as transfers
 4. **Computes net worth** — `Total Assets + Cumulative Cash Flow − Total Liabilities`
 
@@ -205,7 +210,8 @@ Each month the engine:
 
 ## Tips
 
-- For a mortgage: add it as a **liability with amortisation**. Set the Amortization End Date, Term End Date, and Rate at Renewal to model term renewals automatically. Do not add a separate expense event for the payment.
+- For a mortgage: add it as a **liability with amortisation**. Choose **Calculated** payment mode and set the Amortization End Date, Term End Date, and Rate at Renewal to model term renewals automatically. If you know your exact payment amount (e.g., agreed at last renewal), use **Set payment** mode instead — the engine will still amortize correctly. Do not add a separate expense event for the payment.
+- Use **Term Start Date** (Calculated mode) to lock in a stable payment that reflects what was calculated when your term began, rather than having the payment drift down each month.
 - Set the **Payment Source Asset** on your mortgage to track your chequing account balance accurately.
 - For savings contributions: use **Transfer to Asset** on an expense event so your investment account grows from deposits while net worth stays unchanged (it's just moving money).
 - For a paycheck deposited into a brokerage: use **Deposit into Asset** on an income event so the account balance tracks correctly.

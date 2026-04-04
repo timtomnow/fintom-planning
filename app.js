@@ -76,9 +76,11 @@ function defaultLiability() {
     useAmortization: false, monthlyPayment: 0,
     includeInLiquidNW: true,
     paymentAssetName: '',
-    // Mortgage-specific fields (optional; when amortizationEndDate is set, payment is auto-calculated)
-    paymentFrequency: 'monthly', // 'monthly' | 'semi-monthly' | 'bi-weekly'
-    amortizationEndDate: '',     // 'YYYY-MM' — when mortgage is fully paid off
+    // Mortgage-specific fields (optional)
+    paymentMode: 'calculated',   // 'calculated' | 'set' — how the monthly payment is determined
+    paymentFrequency: 'monthly', // 'monthly' | 'semi-monthly' | 'bi-weekly' (calculated mode only)
+    amortizationEndDate: '',     // 'YYYY-MM' — when mortgage is fully paid off (required for calculated mode)
+    termStartDate: '',           // 'YYYY-MM' — when current term started; fixes amortization period for payment calc
     termEndDate: '',             // 'YYYY-MM' — when current mortgage term expires
     renewalRate: 0,              // % annual rate assumed at renewal
   };
@@ -309,6 +311,25 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
     }
   }
 
+  // Pre-compute fixed term payments for calculated-mode liabilities that have a termStartDate.
+  // Payment is calculated once from the initial balance and the full term period, then held constant
+  // until a term renewal occurs, at which point it is recomputed once from the post-renewal balance.
+  const _freqMap = { 'monthly': 12, 'semi-monthly': 24, 'bi-weekly': 26 };
+  for (const l of liabilities) {
+    const pm = l.paymentMode ?? (l.amortizationEndDate ? 'calculated' : 'set');
+    if (l.useAmortization && pm === 'calculated' && l.amortizationEndDate && l.termStartDate) {
+      const freq = _freqMap[l.paymentFrequency ?? 'monthly'] ?? 12;
+      const periodsTotal = Math.max(1, Math.round(monthsBetween(l.termStartDate, l.amortizationEndDate) * freq / 12));
+      const initRate = l.annualInterestRate ?? 0;
+      const ratePerPeriod = initRate / freq / 100;
+      const perPeriodPayment = ratePerPeriod === 0
+        ? l.value / periodsTotal
+        : l.value * ratePerPeriod / (1 - Math.pow(1 + ratePerPeriod, -periodsTotal));
+      l._fixedPayment = perPeriodPayment * freq / 12;
+      l._renewalDone = false;
+    }
+  }
+
   return months.map(month => {
     // Capture net worth at start of month (before any updates)
     const startNetWorth = assets.reduce((s, a) => s + a.value, 0) + cashFlow
@@ -339,18 +360,37 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
 
         // Calculate monthly-equivalent payment
         let payment;
-        if (l.amortizationEndDate) {
-          // Auto-calculate from amortization end date and payment frequency
-          const remainingMonths = Math.max(1, monthsBetween(month, l.amortizationEndDate));
+        const paymentMode = l.paymentMode ?? (l.amortizationEndDate ? 'calculated' : 'set');
+        if (paymentMode === 'calculated' && l.amortizationEndDate) {
           const freqMap = { 'monthly': 12, 'semi-monthly': 24, 'bi-weekly': 26 };
           const freq = freqMap[l.paymentFrequency ?? 'monthly'] ?? 12;
-          const periodsRemaining = Math.max(1, Math.round(remainingMonths * freq / 12));
-          const ratePerPeriod = effectiveRate / freq / 100;
-          const perPeriodPayment = ratePerPeriod === 0
-            ? l.value / periodsRemaining
-            : l.value * ratePerPeriod / (1 - Math.pow(1 + ratePerPeriod, -periodsRemaining));
-          payment = perPeriodPayment * freq / 12; // convert to monthly equivalent
+          if (l._fixedPayment !== undefined) {
+            // termStartDate was set: use fixed payment, recompute once at term renewal
+            const pastTermEnd = l.termEndDate && month > l.termEndDate;
+            if (pastTermEnd && !l._renewalDone) {
+              // First month of renewed term: lock in a new fixed payment from current balance
+              const remainingMonths = Math.max(1, monthsBetween(month, l.amortizationEndDate));
+              const periodsRemaining = Math.max(1, Math.round(remainingMonths * freq / 12));
+              const ratePerPeriod = effectiveRate / freq / 100;
+              const perPeriodPayment = ratePerPeriod === 0
+                ? l.value / periodsRemaining
+                : l.value * ratePerPeriod / (1 - Math.pow(1 + ratePerPeriod, -periodsRemaining));
+              l._fixedPayment = perPeriodPayment * freq / 12;
+              l._renewalDone = true;
+            }
+            payment = l._fixedPayment;
+          } else {
+            // No termStartDate: recalculate each month from remaining time (original behaviour)
+            const remainingMonths = Math.max(1, monthsBetween(month, l.amortizationEndDate));
+            const periodsRemaining = Math.max(1, Math.round(remainingMonths * freq / 12));
+            const ratePerPeriod = effectiveRate / freq / 100;
+            const perPeriodPayment = ratePerPeriod === 0
+              ? l.value / periodsRemaining
+              : l.value * ratePerPeriod / (1 - Math.pow(1 + ratePerPeriod, -periodsRemaining));
+            payment = perPeriodPayment * freq / 12;
+          }
         } else {
+          // 'set' mode: use the user-specified payment; still correctly splits into principal + interest
           payment = l.monthlyPayment ?? 0;
         }
 
@@ -988,13 +1028,14 @@ function renderBaselineDetail() {
           <tbody>
             ${liabs.map(l => {
               const freqLabel = { 'monthly': 'Monthly', 'semi-monthly': 'Semi-Mo.', 'bi-weekly': 'Bi-Wkly' }[l.paymentFrequency ?? 'monthly'] ?? 'Monthly';
+              const effPayMode = l.paymentMode ?? (l.amortizationEndDate ? 'calculated' : 'set');
               const paymentCell = !l.useAmortization
                 ? '<span class="text-muted">—</span>'
-                : l.amortizationEndDate
-                  ? `<span style="font-size:12px;">Auto (${freqLabel})</span>`
+                : effPayMode === 'calculated'
+                  ? `<span style="font-size:12px;">Calc. (${freqLabel}${l.termStartDate ? ', fixed period' : ''})</span>`
                   : fmt$(l.monthlyPayment);
-              const amortCell = l.useAmortization && l.amortizationEndDate
-                ? `<span style="font-size:12px;">${esc(l.amortizationEndDate)}</span>`
+              const amortCell = l.useAmortization && effPayMode === 'calculated' && l.amortizationEndDate
+                ? `<span style="font-size:12px;">${esc(l.amortizationEndDate)}${l.termStartDate ? `<br><span class="text-muted">from ${esc(l.termStartDate)}</span>` : ''}</span>`
                 : '<span class="text-muted">—</span>';
               const termCell = l.useAmortization && l.termEndDate
                 ? `<span style="font-size:12px;">${esc(l.termEndDate)} @ ${fmtPct(l.renewalRate ?? 0)}</span>`
@@ -1169,19 +1210,49 @@ function openLiabilityModal(baselineId, liabilityId = null) {
       <div class="form-hint">Enable for mortgages, auto loans, and any fixed-payment instalment loan.</div>
     </div>
     <div id="fields-amort" ${!l.useAmortization ? 'style="display:none"' : ''}>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Payment Frequency</label>
-          <select id="l-freq">
-            <option value="monthly"${(l.paymentFrequency ?? 'monthly') === 'monthly' ? ' selected' : ''}>Monthly</option>
-            <option value="semi-monthly"${l.paymentFrequency === 'semi-monthly' ? ' selected' : ''}>Semi-Monthly (2×/month)</option>
-            <option value="bi-weekly"${l.paymentFrequency === 'bi-weekly' ? ' selected' : ''}>Bi-Weekly (26×/year)</option>
-          </select>
+      <div class="form-group">
+        <label>Payment Mode</label>
+        <div style="display:flex;gap:24px;margin-top:4px;">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+            <input type="radio" name="l-pay-mode" value="calculated" onchange="onPayModeChange()"
+              ${(l.paymentMode ?? (l.amortizationEndDate ? 'calculated' : 'set')) === 'calculated' ? 'checked' : ''}>
+            Calculated (auto from amortization formula)
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+            <input type="radio" name="l-pay-mode" value="set" onchange="onPayModeChange()"
+              ${(l.paymentMode ?? (l.amortizationEndDate ? 'calculated' : 'set')) === 'set' ? 'checked' : ''}>
+            Set payment (fixed amount you specify)
+          </label>
+        </div>
+        <div class="form-hint">Calculated: payment derived from balance, rate, and amortization period. Set: you specify the exact payment; principal/interest split is still calculated correctly.</div>
+      </div>
+      <div id="fields-pay-calculated" ${(l.paymentMode ?? (l.amortizationEndDate ? 'calculated' : 'set')) !== 'calculated' ? 'style="display:none"' : ''}>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Payment Frequency</label>
+            <select id="l-freq">
+              <option value="monthly"${(l.paymentFrequency ?? 'monthly') === 'monthly' ? ' selected' : ''}>Monthly</option>
+              <option value="semi-monthly"${l.paymentFrequency === 'semi-monthly' ? ' selected' : ''}>Semi-Monthly (2×/month)</option>
+              <option value="bi-weekly"${l.paymentFrequency === 'bi-weekly' ? ' selected' : ''}>Bi-Weekly (26×/year)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Amortization End Date <span class="label-note">(YYYY-MM)</span></label>
+            <input type="text" id="l-amort-end" value="${esc(l.amortizationEndDate ?? '')}" placeholder="e.g. 2050-01">
+            <div class="form-hint">Required. When the loan is fully paid off.</div>
+          </div>
         </div>
         <div class="form-group">
-          <label>Amortization End Date <span class="label-note">(YYYY-MM)</span></label>
-          <input type="text" id="l-amort-end" value="${esc(l.amortizationEndDate ?? '')}" placeholder="e.g. 2050-01">
-          <div class="form-hint">When the loan is fully paid off. If set, payment is auto-calculated each month.</div>
+          <label>Term Start Date <span class="label-note">(YYYY-MM, optional)</span></label>
+          <input type="text" id="l-term-start" value="${esc(l.termStartDate ?? '')}" placeholder="e.g. 2025-01">
+          <div class="form-hint">When the current mortgage term started. If set, the amortization period for payment calculation is fixed from this date to the end date (gives a stable payment that matches what was agreed at term start). Leave blank to recalculate monthly from remaining time.</div>
+        </div>
+      </div>
+      <div id="fields-pay-set" ${(l.paymentMode ?? (l.amortizationEndDate ? 'calculated' : 'set')) !== 'set' ? 'style="display:none"' : ''}>
+        <div class="form-group">
+          <label>Monthly Payment ($)</label>
+          <input type="number" id="l-pay" value="${l.monthlyPayment}" step="10" min="0">
+          <div class="form-hint">Fixed payment amount. Automatically split into principal and interest each month based on the current balance and rate.</div>
         </div>
       </div>
       <div class="form-row">
@@ -1195,11 +1266,6 @@ function openLiabilityModal(baselineId, liabilityId = null) {
           <input type="number" id="l-renewal-rate" value="${l.renewalRate ?? 0}" step="0.01" min="0">
           <div class="form-hint">Assumed annual interest rate applied after the term end date.</div>
         </div>
-      </div>
-      <div class="form-group">
-        <label>Manual Monthly Payment ($) <span class="label-note">(used only if Amortization End Date is blank)</span></label>
-        <input type="number" id="l-pay" value="${l.monthlyPayment}" step="10" min="0">
-        <div class="form-hint">Enter a fixed payment when not using auto-calculation. Automatically split into principal and interest.</div>
       </div>
       <div class="form-group">
         <label>Payment Source Asset <span class="label-note">(optional)</span></label>
@@ -1219,11 +1285,13 @@ function openLiabilityModal(baselineId, liabilityId = null) {
       annualInterestRate: parseFloat(document.getElementById('l-rate').value) || 0,
       includeInLiquidNW: document.getElementById('l-liquid-nw').checked,
       useAmortization: document.getElementById('l-amort').checked,
+      paymentMode: document.querySelector('input[name="l-pay-mode"]:checked')?.value ?? 'calculated',
       paymentFrequency: document.getElementById('l-freq')?.value ?? 'monthly',
       amortizationEndDate: document.getElementById('l-amort-end')?.value.trim() ?? '',
+      termStartDate: document.getElementById('l-term-start')?.value.trim() ?? '',
       termEndDate: document.getElementById('l-term-end')?.value.trim() ?? '',
       renewalRate: parseFloat(document.getElementById('l-renewal-rate')?.value) || 0,
-      monthlyPayment: parseFloat(document.getElementById('l-pay').value) || 0,
+      monthlyPayment: parseFloat(document.getElementById('l-pay')?.value) || 0,
       paymentAssetName: document.getElementById('l-pay-asset').value,
     };
 
@@ -1243,6 +1311,16 @@ function openLiabilityModal(baselineId, liabilityId = null) {
 function toggleAmortFields() {
   document.getElementById('fields-amort').style.display =
     document.getElementById('l-amort').checked ? '' : 'none';
+  onPayModeChange();
+}
+
+function onPayModeChange() {
+  const calcEl = document.getElementById('fields-pay-calculated');
+  const setEl = document.getElementById('fields-pay-set');
+  if (!calcEl || !setEl) return;
+  const mode = document.querySelector('input[name="l-pay-mode"]:checked')?.value ?? 'calculated';
+  calcEl.style.display = mode === 'calculated' ? '' : 'none';
+  setEl.style.display = mode === 'set' ? '' : 'none';
 }
 
 function deleteLiability(baselineId, liabilityId) {

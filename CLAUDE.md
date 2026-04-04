@@ -105,12 +105,14 @@ Older saves without `eventSets` are migrated on load: `state.data.eventSets = st
   category,
   annualInterestRate,
   useAmortization,      // bool
-  monthlyPayment,       // used when useAmortization = true AND amortizationEndDate is blank
+  monthlyPayment,       // fixed payment used when paymentMode = 'set'
   includeInLiquidNW,    // bool (default true) — whether to subtract this liability in liquidNetWorth
   paymentAssetName,     // string (optional) — name of asset to deduct payment from instead of cashFlow
-  // Mortgage-specific fields (all optional; activate auto-calculation by setting amortizationEndDate)
-  paymentFrequency,     // 'monthly' | 'semi-monthly' | 'bi-weekly' (default 'monthly')
-  amortizationEndDate,  // 'YYYY-MM' — when the loan is fully paid off; triggers auto payment calculation
+  // Mortgage-specific fields (all optional)
+  paymentMode,          // 'calculated' | 'set' — how the monthly payment is determined (default 'calculated')
+  paymentFrequency,     // 'monthly' | 'semi-monthly' | 'bi-weekly' (default 'monthly'; calculated mode only)
+  amortizationEndDate,  // 'YYYY-MM' — when the loan is fully paid off (required for calculated mode)
+  termStartDate,        // 'YYYY-MM' — when the current term started; fixes amortization period for payment calc
   termEndDate,          // 'YYYY-MM' — when the current mortgage term expires
   renewalRate,          // % annual — rate assumed after termEndDate
 }
@@ -118,11 +120,17 @@ Older saves without `eventSets` are migrated on load: `state.data.eventSets = st
 
 **Important:** When `useAmortization` is true, the forecast engine deducts a payment from `cashFlow` each month (or from `paymentAssetName` asset if set) and reduces the liability balance by the principal portion. The user should NOT also create an expense event for the same payment — that would double-count it.
 
-**Auto-calculated payment** — when `amortizationEndDate` is set, the engine calculates the payment each month using the standard amortization formula based on the current balance, effective rate, remaining months, and payment frequency. This means the payment automatically adjusts at term renewal. When `amortizationEndDate` is blank, `monthlyPayment` is used as a fixed amount.
+**Payment modes** — controlled by `paymentMode`:
+- `'calculated'` (default): payment is auto-derived each month from the standard amortization formula using the current balance, effective rate, `amortizationEndDate`, and `paymentFrequency`. Requires `amortizationEndDate`.
+- `'set'`: the user specifies `monthlyPayment` as a fixed amount. The engine still correctly splits it into principal and interest each month — the balance reduces by `payment - interest`. This matches how a real mortgage payment works: fixed amount, changing split.
 
-**Term renewal** — when `termEndDate` is set and the current forecast month is past that date, the engine switches from `annualInterestRate` to `renewalRate`. The payment recalculates automatically because it is derived from the balance and remaining amortization period each month.
+**Term start date** — when `termStartDate` is set in `'calculated'` mode, the payment is pre-computed **once** before the month loop from the initial balance and `monthsBetween(termStartDate, amortizationEndDate)` periods, then held constant for the entire term. Stored as `l._fixedPayment` on the deep-cloned liability object (never persisted). At term renewal (first month after `termEndDate`), the payment is recomputed once from the post-renewal balance and remaining amortization (`_renewalDone` flag prevents further recomputes). Liabilities without `termStartDate` continue to recalculate the payment each month.
 
-**Payment frequency** — `paymentFrequency` controls how many payments occur per year (monthly = 12, semi-monthly = 24, bi-weekly = 26). The engine converts to a monthly-equivalent cash outflow using the per-period amortization formula. Bi-weekly produces slightly higher annual payments than monthly (26 vs 24 half-monthly equivalents), which reduces the amortization period.
+**Term renewal** — when `termEndDate` is set and the current forecast month is past that date, the engine switches from `annualInterestRate` to `renewalRate`. In `'calculated'` mode the payment is recalculated using the renewal rate and remaining amortization from the current month.
+
+**Payment frequency** — `paymentFrequency` controls how many payments occur per year (monthly = 12, semi-monthly = 24, bi-weekly = 26). The engine converts to a monthly-equivalent cash outflow using the per-period amortization formula. Bi-weekly produces slightly higher annual payments than monthly (26 vs 24 half-monthly equivalents), which reduces the amortization period. Only applies in `'calculated'` mode.
+
+**Backward compatibility** — existing records without `paymentMode` default to `'calculated'` if `amortizationEndDate` is set, `'set'` otherwise. This matches pre-existing behaviour.
 
 `includeInLiquidNW` — when false, this liability is excluded from the `liquidNetWorth` calculation. Use for mortgages on illiquid property you would not sell to settle the debt.
 
