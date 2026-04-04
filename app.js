@@ -25,6 +25,7 @@ const EVENT_CATEGORIES = [
 // Maps sub-pages to their parent sidebar page for active highlighting
 const SIDEBAR_MAP = {
   'baseline-detail': 'baselines',
+  'event-set-detail': 'event-sets',
   'results': 'analysis',
 };
 
@@ -50,6 +51,7 @@ function defaultData() {
     version: 1,
     baselines: [],
     events: [],
+    eventSets: [],
     analysisConfigs: [],
     settings: { defaultInflationRate: 3, defaultTaxRate: 22 },
   };
@@ -94,6 +96,8 @@ function defaultAnalysisConfig() {
   return {
     id: uuid(), name: 'New Analysis',
     baselineId: '', compareBaselineId: '',
+    eventSetIds: [],
+    compareEventSetIds: [],
     startDate: today(), endDate: addMonths(today(), 120),
     viewMode: 'yearly',
     inflationRate: s.defaultInflationRate ?? 3,
@@ -105,6 +109,10 @@ function defaultAnalysisConfig() {
   };
 }
 
+function defaultEventSet() {
+  return { id: uuid(), name: '', description: '', eventIds: [] };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // STORAGE
 // ═══════════════════════════════════════════════════════════════
@@ -113,6 +121,8 @@ function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     state.data = raw ? JSON.parse(raw) : defaultData();
+    // Migrate older saves that predate event sets
+    state.data.eventSets = state.data.eventSets ?? [];
   } catch (e) {
     state.data = defaultData();
   }
@@ -262,8 +272,9 @@ function isEventActive(event, month) {
  * Run one simulation pass.
  * returnSampler(asset)  → annualReturn%  (null = use asset.annualMeanReturn)
  * amountSampler(event)  → amount         (null = use event.amount)
+ * events                → event array to use (null = all global events)
  */
-function runSingleForecast(baselineId, config, returnSampler = null, amountSampler = null) {
+function runSingleForecast(baselineId, config, returnSampler = null, amountSampler = null, events = null) {
   const baseline = state.data.baselines.find(b => b.id === baselineId);
   if (!baseline) return [];
 
@@ -280,8 +291,9 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
     const startNetWorth = assets.reduce((s, a) => s + a.value, 0) + cashFlow
                         - liabilities.reduce((s, l) => s + l.value, 0);
 
-    let incomeThisMonth  = 0;
-    let expenseThisMonth = 0;
+    let incomeThisMonth   = 0;
+    let expenseThisMonth  = 0;
+    let transferThisMonth = 0;
 
     // 1. Grow assets
     for (const a of assets) {
@@ -311,7 +323,8 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
     }
 
     // 3. Apply events
-    for (const ev of state.data.events) {
+    const activeEvents = events ?? state.data.events;
+    for (const ev of activeEvents) {
       if (!isEventActive(ev, month)) continue;
 
       let amount = amountSampler ? amountSampler(ev) : ev.amount;
@@ -331,11 +344,16 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
         }
         case 'expense': {
           cashFlow -= amount;
-          expenseThisMonth += amount;
-          // Transfer to linked asset (e.g. savings deposit): NW-neutral
           if (ev.linkedAssetName) {
             const linked = assetMap.get(ev.linkedAssetName);
-            if (linked) linked.value += amount;
+            if (linked) {
+              linked.value += amount;
+              transferThisMonth += amount;
+            } else {
+              expenseThisMonth += amount;
+            }
+          } else {
+            expenseThisMonth += amount;
           }
           break;
         }
@@ -346,10 +364,16 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
         }
         case 'one_time_outflow': {
           cashFlow -= amount;
-          expenseThisMonth += amount;
           if (ev.linkedAssetName) {
             const linked = assetMap.get(ev.linkedAssetName);
-            if (linked) linked.value += amount;
+            if (linked) {
+              linked.value += amount;
+              transferThisMonth += amount;
+            } else {
+              expenseThisMonth += amount;
+            }
+          } else {
+            expenseThisMonth += amount;
           }
           break;
         }
@@ -365,15 +389,15 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
     const liquidNetWorth  = liquidTotal + cashFlow - liquidLiabTotal;
 
     return { month, netWorth, liquidNetWorth, assetTotal, liabTotal, cashFlow,
-             startNetWorth, incomeThisMonth, expenseThisMonth };
+             startNetWorth, incomeThisMonth, expenseThisMonth, transferThisMonth };
   });
 }
 
-function runDeterministicForecast(baselineId, config) {
-  return runSingleForecast(baselineId, config);
+function runDeterministicForecast(baselineId, config, events = null) {
+  return runSingleForecast(baselineId, config, null, null, events);
 }
 
-function runMonteCarloForecast(baselineId, config, mcConfig) {
+function runMonteCarloForecast(baselineId, config, mcConfig, events = null) {
   const n = mcConfig.numSimulations ?? 500;
   const months = getMonthRange(config.startDate, config.endDate);
   // Collect net worth per time step across all simulations
@@ -384,7 +408,7 @@ function runMonteCarloForecast(baselineId, config, mcConfig) {
     const amtSampler    = ev => ev.stdDevAmount > 0
       ? Math.max(0, sampleNormal(ev.amount, ev.stdDevAmount))
       : ev.amount;
-    const results = runSingleForecast(baselineId, config, returnSampler, amtSampler);
+    const results = runSingleForecast(baselineId, config, returnSampler, amtSampler, events);
     results.forEach((r, i) => buckets[i].push(r.netWorth));
   }
 
@@ -410,11 +434,12 @@ function aggregateYearly(monthly) {
   for (const r of monthly) {
     const yr = r.month.slice(0, 4);
     if (!map[yr]) {
-      map[yr] = { ...r, incomeThisMonth: 0, expenseThisMonth: 0 };
+      map[yr] = { ...r, incomeThisMonth: 0, expenseThisMonth: 0, transferThisMonth: 0 };
       // startNetWorth stays as the first month's value (set once here)
     }
-    map[yr].incomeThisMonth  += r.incomeThisMonth  ?? 0;
-    map[yr].expenseThisMonth += r.expenseThisMonth ?? 0;
+    map[yr].incomeThisMonth   += r.incomeThisMonth   ?? 0;
+    map[yr].expenseThisMonth  += r.expenseThisMonth  ?? 0;
+    map[yr].transferThisMonth += r.transferThisMonth ?? 0;
     // Overwrite balance-sheet fields with the latest month's values
     map[yr].month        = r.month;
     map[yr].netWorth     = r.netWorth;
@@ -553,17 +578,19 @@ function navigate(page, params = {}) {
 
   const main = document.getElementById('main');
   switch (page) {
-    case 'dashboard':       main.innerHTML = renderDashboard(); break;
-    case 'baselines':       main.innerHTML = renderBaselines(); break;
-    case 'baseline-detail': main.innerHTML = renderBaselineDetail(); break;
-    case 'events':          main.innerHTML = renderEvents(); break;
-    case 'analysis':        main.innerHTML = renderAnalysis(); break;
+    case 'dashboard':         main.innerHTML = renderDashboard(); break;
+    case 'baselines':         main.innerHTML = renderBaselines(); break;
+    case 'baseline-detail':   main.innerHTML = renderBaselineDetail(); break;
+    case 'events':            main.innerHTML = renderEvents(); break;
+    case 'event-sets':        main.innerHTML = renderEventSets(); break;
+    case 'event-set-detail':  main.innerHTML = renderEventSetDetail(); break;
+    case 'analysis':          main.innerHTML = renderAnalysis(); break;
     case 'results':
       main.innerHTML = renderResults();
       requestAnimationFrame(attachResultsCharts);
       break;
-    case 'settings':        main.innerHTML = renderSettings(); break;
-    default:                main.innerHTML = renderDashboard();
+    case 'settings':          main.innerHTML = renderSettings(); break;
+    default:                  main.innerHTML = renderDashboard();
   }
 }
 
@@ -572,7 +599,7 @@ function navigate(page, params = {}) {
 // ═══════════════════════════════════════════════════════════════
 
 function renderDashboard() {
-  const { baselines, events, analysisConfigs } = state.data;
+  const { baselines, events, eventSets, analysisConfigs } = state.data;
 
   let latestNW = null;
   if (baselines.length) {
@@ -609,8 +636,8 @@ function renderDashboard() {
         <div class="stat-value">${baselines.length}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Events</div>
-        <div class="stat-value">${events.length}</div>
+        <div class="stat-label">Events / Event Sets</div>
+        <div class="stat-value">${events.length} / ${eventSets.length}</div>
       </div>
     </div>
 
@@ -1329,9 +1356,219 @@ function deleteEvent(id) {
   const ev = state.data.events.find(e => e.id === id);
   showConfirm('Delete Event', `Delete "${ev?.name}"?`, () => {
     state.data.events = state.data.events.filter(e => e.id !== id);
+    // Remove from any event sets that reference it
+    for (const es of state.data.eventSets) {
+      es.eventIds = (es.eventIds ?? []).filter(eid => eid !== id);
+    }
     saveData();
     navigate('events', state.params);
     showToast('Event deleted');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EVENT SETS PAGE
+// ═══════════════════════════════════════════════════════════════
+
+function renderEventSets() {
+  const { eventSets } = state.data;
+  return `<div class="page">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Event Sets</div>
+        <div class="page-subtitle">Named groups of events you can apply to analyses</div>
+      </div>
+      <button class="btn btn-primary" onclick="openEventSetModal()">+ New Event Set</button>
+    </div>
+
+    ${eventSets.length === 0 ? `
+      <div class="card">
+        <div class="empty-state">
+          <div class="empty-state-icon">🗂</div>
+          <div class="empty-state-title">No event sets yet</div>
+          <div class="empty-state-body">An event set is a named collection of events — income, expenses, or one-time items — that you can attach to a specific analysis. Create multiple sets to compare scenarios side-by-side.</div>
+          <button class="btn btn-primary" onclick="openEventSetModal()">Create Event Set</button>
+        </div>
+      </div>
+    ` : `
+      <div class="card">
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Name</th><th>Description</th><th class="text-right">Events</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${eventSets.map(es => {
+              const count = (es.eventIds ?? []).length;
+              return `<tr>
+                <td><strong>${esc(es.name)}</strong></td>
+                <td class="text-muted" style="font-size:13px;">${es.description ? esc(es.description) : '<span class="text-muted">—</span>'}</td>
+                <td class="text-right">${count} event${count !== 1 ? 's' : ''}</td>
+                <td>
+                  <div class="flex gap-2 justify-end">
+                    <button class="btn btn-sm btn-secondary" onclick="navigate('event-set-detail',{id:'${es.id}'})">Manage Events</button>
+                    <button class="btn btn-sm btn-ghost" onclick="openEventSetModal('${es.id}')">Edit</button>
+                    <button class="btn btn-sm btn-ghost text-negative" onclick="deleteEventSet('${es.id}')">Delete</button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table></div>
+      </div>
+    `}
+  </div>`;
+}
+
+function renderEventSetDetail() {
+  const es = state.data.eventSets.find(s => s.id === state.params.id);
+  if (!es) return '<div class="page"><p class="text-muted">Event set not found.</p></div>';
+
+  const setEvents = state.data.events.filter(e => (es.eventIds ?? []).includes(e.id));
+  const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time' }[t] ?? '');
+  const typeLabel  = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out' }[t] ?? t);
+
+  return `<div class="page">
+    <div class="page-header">
+      <div>
+        <div class="page-title">${esc(es.name)}</div>
+        <div class="page-subtitle">${es.description ? esc(es.description) : 'Event Set'}</div>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-primary" onclick="openEventSetEventsModal('${es.id}')">+ Add / Remove Events</button>
+        <button class="btn btn-secondary" onclick="navigate('event-sets')">← Back</button>
+      </div>
+    </div>
+
+    ${setEvents.length === 0 ? `
+      <div class="card">
+        <div class="empty-state">
+          <div class="empty-state-icon">📅</div>
+          <div class="empty-state-title">No events in this set</div>
+          <div class="empty-state-body">Add existing events to this set, or create new events on the Events page first.</div>
+          <button class="btn btn-primary" onclick="openEventSetEventsModal('${es.id}')">Add Events</button>
+        </div>
+      </div>
+    ` : `
+      <div class="card">
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Name</th><th>Type</th><th>Category</th>
+            <th class="text-right">Amount</th><th>Frequency</th><th>Period</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${setEvents.map(ev => `<tr>
+              <td>
+                <strong>${esc(ev.name)}</strong>
+                ${ev.notes ? `<br><span class="text-muted" style="font-size:12px;">${esc(ev.notes)}</span>` : ''}
+              </td>
+              <td><span class="badge ${badgeClass(ev.type)}">${typeLabel(ev.type)}</span></td>
+              <td class="text-muted">${esc(ev.category)}</td>
+              <td class="text-right font-mono">${fmt$(ev.amount)}</td>
+              <td>${ev.isRecurring && ev.type !== 'one_time_inflow' && ev.type !== 'one_time_outflow' ? 'Monthly' : 'One-time'}</td>
+              <td class="text-muted nowrap" style="font-size:12px;">
+                ${monthLabel(ev.startDate)}${ev.isRecurring && ev.endDate ? ` – ${monthLabel(ev.endDate)}` : ev.isRecurring ? ' onwards' : ''}
+              </td>
+              <td>
+                <button class="btn btn-sm btn-ghost text-negative" onclick="removeEventFromSet('${es.id}','${ev.id}')">Remove</button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>
+      </div>
+    `}
+  </div>`;
+}
+
+function openEventSetModal(id = null) {
+  const existing = id ? state.data.eventSets.find(s => s.id === id) : null;
+  const es = existing ?? defaultEventSet();
+  showModal(existing ? 'Edit Event Set' : 'New Event Set', `
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="es-name" value="${esc(es.name)}" placeholder="e.g., Base Expenses, Optimistic Income">
+    </div>
+    <div class="form-group">
+      <label>Description <span class="label-note">(optional)</span></label>
+      <input type="text" id="es-desc" value="${esc(es.description ?? '')}" placeholder="e.g., Assumes job change in 2027">
+    </div>
+  `, () => {
+    const name = document.getElementById('es-name').value.trim();
+    if (!name) { showToast('Name is required', 'error'); return false; }
+    if (existing) {
+      existing.name = name;
+      existing.description = document.getElementById('es-desc').value.trim();
+    } else {
+      state.data.eventSets.push({
+        id: uuid(), name,
+        description: document.getElementById('es-desc').value.trim(),
+        eventIds: [],
+      });
+    }
+    saveData();
+    navigate('event-sets');
+    showToast(existing ? 'Event set updated' : 'Event set created', 'success');
+    return true;
+  });
+}
+
+function openEventSetEventsModal(setId) {
+  const es = state.data.eventSets.find(s => s.id === setId);
+  if (!es) return;
+  const currentIds = new Set(es.eventIds ?? []);
+  const { events } = state.data;
+
+  if (events.length === 0) {
+    showToast('No events exist yet — create some on the Events page first.', 'error');
+    return;
+  }
+
+  const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time' }[t] ?? '');
+  const typeLabel  = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out' }[t] ?? t);
+
+  showModal(`Add / Remove Events — ${esc(es.name)}`, `
+    <div class="form-hint" style="margin-bottom:10px;">Check each event to include it in this set.</div>
+    <div style="max-height:360px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px;">
+      ${events.map(ev => `
+        <label class="checkbox-label" style="padding:5px 4px;align-items:flex-start;">
+          <input type="checkbox" name="es-ev" value="${ev.id}" ${currentIds.has(ev.id) ? 'checked' : ''} style="margin-top:2px;">
+          <span>
+            <strong>${esc(ev.name)}</strong>
+            <span class="badge ${badgeClass(ev.type)}" style="margin-left:6px;font-size:10px;">${typeLabel(ev.type)}</span>
+            <span style="color:var(--muted);font-size:12px;margin-left:6px;">${fmt$(ev.amount)}</span>
+          </span>
+        </label>
+      `).join('')}
+    </div>
+  `, () => {
+    es.eventIds = [...document.querySelectorAll('input[name="es-ev"]:checked')].map(el => el.value);
+    saveData();
+    navigate('event-set-detail', { id: setId });
+    showToast('Event set updated', 'success');
+    return true;
+  }, 'Save');
+}
+
+function removeEventFromSet(setId, eventId) {
+  const es = state.data.eventSets.find(s => s.id === setId);
+  if (!es) return;
+  es.eventIds = (es.eventIds ?? []).filter(id => id !== eventId);
+  saveData();
+  navigate('event-set-detail', { id: setId });
+  showToast('Event removed from set');
+}
+
+function deleteEventSet(id) {
+  const es = state.data.eventSets.find(s => s.id === id);
+  showConfirm('Delete Event Set', `Delete "${es?.name}"? The events themselves will not be deleted.`, () => {
+    state.data.eventSets = state.data.eventSets.filter(s => s.id !== id);
+    // Remove from any analysis configs that reference it
+    for (const cfg of state.data.analysisConfigs) {
+      cfg.eventSetIds = (cfg.eventSetIds ?? []).filter(sid => sid !== id);
+      cfg.compareEventSetIds = (cfg.compareEventSetIds ?? []).filter(sid => sid !== id);
+    }
+    saveData();
+    navigate('event-sets');
+    showToast('Event set deleted');
   });
 }
 
@@ -1340,7 +1577,7 @@ function deleteEvent(id) {
 // ═══════════════════════════════════════════════════════════════
 
 function renderAnalysis() {
-  const { baselines, analysisConfigs } = state.data;
+  const { baselines, analysisConfigs, eventSets } = state.data;
 
   if (!baselines.length) return `<div class="page">
     <div class="page-header"><div class="page-title">Analysis</div></div>
@@ -1369,17 +1606,25 @@ function renderAnalysis() {
       <div class="card">
         <div class="table-wrap"><table>
           <thead><tr>
-            <th>Name</th><th>Primary Baseline</th><th>Compare</th>
+            <th>Name</th><th>Primary Baseline</th><th>Primary Event Sets</th>
+            <th>Compare Baseline</th><th>Compare Event Sets</th>
             <th>Period</th><th>Inflation</th><th>Tax</th><th>Monte Carlo</th><th></th>
           </tr></thead>
           <tbody>
             ${analysisConfigs.map(cfg => {
               const bl  = baselines.find(b => b.id === cfg.baselineId);
               const cbl = baselines.find(b => b.id === cfg.compareBaselineId);
+              const primarySetNames  = (cfg.eventSetIds ?? []).map(sid => eventSets.find(s => s.id === sid)?.name).filter(Boolean);
+              const compareSetNames  = (cfg.compareEventSetIds ?? []).map(sid => eventSets.find(s => s.id === sid)?.name).filter(Boolean);
+              const renderSets = names => names.length
+                ? names.map(n => `<span class="badge">${esc(n)}</span>`).join(' ')
+                : '<span class="text-muted" style="font-size:12px;">All events</span>';
               return `<tr>
                 <td><strong>${esc(cfg.name)}</strong></td>
                 <td>${bl ? esc(bl.name) : '<span class="text-muted">—</span>'}</td>
+                <td>${renderSets(primarySetNames)}</td>
                 <td>${cbl ? esc(cbl.name) : '<span class="text-muted">—</span>'}</td>
+                <td>${compareSetNames.length ? renderSets(compareSetNames) : (cbl || primarySetNames.length ? renderSets(primarySetNames) : '<span class="text-muted">—</span>')}</td>
                 <td class="text-muted nowrap" style="font-size:12px;">${monthLabel(cfg.startDate)} – ${monthLabel(cfg.endDate)}</td>
                 <td class="font-mono" style="font-size:12px;">${cfg.inflationRate}%</td>
                 <td class="font-mono" style="font-size:12px;">${cfg.taxRate}%</td>
@@ -1403,7 +1648,7 @@ function renderAnalysis() {
 }
 
 function openConfigModal(id = null) {
-  const { baselines } = state.data;
+  const { baselines, eventSets } = state.data;
   const existing = id ? state.data.analysisConfigs.find(c => c.id === id) : null;
   const cfg = existing ?? defaultAnalysisConfig();
 
@@ -1414,21 +1659,53 @@ function openConfigModal(id = null) {
     `<option value="${bl.id}"${cfg.compareBaselineId === bl.id ? ' selected' : ''}>${esc(bl.name)} (${monthLabel(bl.date)})</option>`
   ).join('');
 
+  const primaryIds = new Set(cfg.eventSetIds ?? []);
+  const compareIds = new Set(cfg.compareEventSetIds ?? []);
+
+  const renderSetCheckboxes = (name, checkedIds) => eventSets.length === 0
+    ? `<div class="form-hint">No event sets yet — <a href="#" onclick="hideModal();navigate('event-sets');return false;">create one first</a>.</div>`
+    : `<div style="max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:6px 8px;">
+        ${eventSets.map(es => `
+          <label class="checkbox-label" style="padding:3px 0;">
+            <input type="checkbox" name="${name}" value="${es.id}" ${checkedIds.has(es.id) ? 'checked' : ''}>
+            ${esc(es.name)} <span class="label-note">(${(es.eventIds ?? []).length} events)</span>
+          </label>`).join('')}
+       </div>
+       <div class="form-hint">Leave all unchecked to use all global events.</div>`;
+
   showModal(existing ? 'Edit Configuration' : 'New Analysis Configuration', `
     <div class="form-group">
       <label>Name</label>
       <input type="text" id="cfg-name" value="${esc(cfg.name)}" placeholder="e.g., 10-Year Retirement Forecast">
     </div>
+
+    <hr class="divider">
+    <div style="font-weight:600;margin-bottom:12px;">Primary Scenario</div>
     <div class="form-row">
       <div class="form-group">
-        <label>Primary Baseline</label>
+        <label>Baseline</label>
         <select id="cfg-bl"><option value="">— Select —</option>${blOptions}</select>
       </div>
+    </div>
+    <div class="form-group">
+      <label>Event Sets <span class="label-note">(select which to include)</span></label>
+      ${renderSetCheckboxes('cfg-es-primary', primaryIds)}
+    </div>
+
+    <hr class="divider">
+    <div style="font-weight:600;margin-bottom:12px;">Compare Scenario <span class="label-note" style="font-weight:400;">(optional)</span></div>
+    <div class="form-row">
       <div class="form-group">
-        <label>Compare Baseline <span class="label-note">(optional)</span></label>
+        <label>Compare Baseline <span class="label-note">(leave blank to use same baseline)</span></label>
         <select id="cfg-cbl">${cblOptions}</select>
       </div>
     </div>
+    <div class="form-group">
+      <label>Compare Event Sets <span class="label-note">(leave blank to use same as primary)</span></label>
+      ${renderSetCheckboxes('cfg-es-compare', compareIds)}
+    </div>
+
+    <hr class="divider">
     <div class="form-row">
       <div class="form-group">
         <label>Start Date</label>
@@ -1488,6 +1765,8 @@ function openConfigModal(id = null) {
       id: existing?.id ?? uuid(),
       name, baselineId,
       compareBaselineId: document.getElementById('cfg-cbl').value || '',
+      eventSetIds: [...document.querySelectorAll('input[name="cfg-es-primary"]:checked')].map(el => el.value),
+      compareEventSetIds: [...document.querySelectorAll('input[name="cfg-es-compare"]:checked')].map(el => el.value),
       startDate: start, endDate: end,
       viewMode: existing?.viewMode ?? 'yearly',
       inflationRate: parseFloat(document.getElementById('cfg-inf').value) || 0,
@@ -1526,20 +1805,37 @@ function deleteConfig(id) {
   });
 }
 
+// Returns the events array for a config based on its eventSetIds.
+// Empty / missing eventSetIds → all global events (backward-compatible default).
+function resolveEventSets(setIds) {
+  if (!setIds?.length) return state.data.events;
+  const ids = new Set(setIds.flatMap(sid => {
+    const es = state.data.eventSets.find(s => s.id === sid);
+    return es ? es.eventIds : [];
+  }));
+  return state.data.events.filter(e => ids.has(e.id));
+}
+
 function runAndView(configId) {
   const cfg = state.data.analysisConfigs.find(c => c.id === configId);
   if (!cfg) return;
 
-  const detResults = runDeterministicForecast(cfg.baselineId, cfg);
-  const cmpResults = cfg.compareBaselineId
-    ? runDeterministicForecast(cfg.compareBaselineId, cfg)
+  const primaryEvents = resolveEventSets(cfg.eventSetIds);
+  const hasCompare = cfg.compareBaselineId || cfg.compareEventSetIds?.length;
+  const compareEvents = cfg.compareEventSetIds?.length
+    ? resolveEventSets(cfg.compareEventSetIds)
+    : primaryEvents;
+
+  const detResults = runDeterministicForecast(cfg.baselineId, cfg, primaryEvents);
+  const cmpResults = hasCompare
+    ? runDeterministicForecast(cfg.compareBaselineId || cfg.baselineId, cfg, compareEvents)
     : null;
 
   if (cfg.monteCarlo?.enabled) {
     showToast(`Running ${cfg.monteCarlo.numSimulations} simulations…`);
     // Yield to browser for toast paint, then run (may block briefly for large N)
     setTimeout(() => {
-      const mcResults = runMonteCarloForecast(cfg.baselineId, cfg, cfg.monteCarlo);
+      const mcResults = runMonteCarloForecast(cfg.baselineId, cfg, cfg.monteCarlo, primaryEvents);
       state.lastRun = { detResults, cmpResults, mcResults };
       state.lastRunConfig = cfg;
       navigate('results', { configId });
@@ -1669,36 +1965,46 @@ function renderResults() {
             <th class="text-right">Start NW</th>
             <th class="text-right">+ Income</th>
             <th class="text-right">− Expenses</th>
+            <th class="text-right">→ Transfers</th>
+            <th class="text-right">= Cash Flow</th>
+            <th class="text-right">Cum. Cash Flow</th>
             <th class="text-right">Δ NW</th>
             <th class="text-right">End NW</th>
             <th class="text-right">Liquid NW</th>
             <th class="text-right">Assets</th>
             <th class="text-right">Liabilities</th>
-            <th class="text-right">Cum. Cash Flow</th>
             ${cmp ? '<th class="text-right">Compare NW</th>' : ''}
             ${mc  ? '<th class="text-right">P10</th><th class="text-right">P50</th><th class="text-right">P90</th>' : ''}
           </tr></thead>
           <tbody>
-            ${det.map((r, i) => {
-              const delta = r.netWorth - (r.startNetWorth ?? r.netWorth);
-              return `<tr>
+            ${det.reduce((acc, r, i) => {
+              const delta    = r.netWorth - (r.startNetWorth ?? r.netWorth);
+              const transfer = r.transferThisMonth ?? 0;
+              const cf       = (r.incomeThisMonth ?? 0) - (r.expenseThisMonth ?? 0);
+              const cumCF    = acc.cumCF + cf;
+              acc.cumCF = cumCF;
+              acc.html += `<tr>
               <td class="nowrap">${vm === 'yearly' ? r.month : monthLabel(r.month)}</td>
               <td class="text-right font-mono text-muted">${fmt$(r.startNetWorth ?? 0)}</td>
               <td class="text-right font-mono text-positive">${fmt$(r.incomeThisMonth ?? 0)}</td>
               <td class="text-right font-mono text-negative">${fmt$(r.expenseThisMonth ?? 0)}</td>
+              <td class="text-right font-mono text-muted">${transfer > 0 ? fmt$(transfer) : '—'}</td>
+              <td class="text-right font-mono ${cf >= 0 ? 'text-positive' : 'text-negative'}">${fmt$(cf)}</td>
+              <td class="text-right font-mono ${cumCF >= 0 ? '' : 'text-negative'}">${fmt$(cumCF)}</td>
               <td class="text-right font-mono ${delta >= 0 ? 'text-positive' : 'text-negative'}">${delta >= 0 ? '+' : ''}${fmt$(delta)}</td>
               <td class="text-right font-mono ${r.netWorth >= 0 ? 'text-positive' : 'text-negative'}">${fmt$(r.netWorth)}</td>
               <td class="text-right font-mono">${fmt$(r.liquidNetWorth)}</td>
               <td class="text-right font-mono">${fmt$(r.assetTotal)}</td>
               <td class="text-right font-mono text-negative">${fmt$(r.liabTotal)}</td>
-              <td class="text-right font-mono ${r.cashFlow >= 0 ? '' : 'text-negative'}">${fmt$(r.cashFlow)}</td>
               ${cmp ? `<td class="text-right font-mono">${fmt$(cmp[i]?.netWorth)}</td>` : ''}
               ${mc  ? `
                 <td class="text-right font-mono text-muted">${fmt$(mc[i]?.p10)}</td>
                 <td class="text-right font-mono">${fmt$(mc[i]?.p50)}</td>
                 <td class="text-right font-mono">${fmt$(mc[i]?.p90)}</td>
               ` : ''}
-            </tr>`;}).join('')}
+            </tr>`;
+              return acc;
+            }, { html: '', cumCF: 0 }).html}
           </tbody>
         </table>
       </div>
@@ -1841,20 +2147,27 @@ function exportCSV() {
   const cmp = run.cmpResults ? (vm === 'yearly' ? aggregateYearly(run.cmpResults) : run.cmpResults) : null;
   const mc  = run.mcResults  ? (vm === 'yearly' ? aggregateMCYearly(run.mcResults) : run.mcResults) : null;
 
-  const headers = ['Period','Start NW','+ Income','- Expenses','Delta NW','End NW','Liquid Net Worth','Assets','Liabilities','Cum Cash Flow'];
+  const headers = ['Period','Start NW','+ Income','- Expenses','-> Transfers','Cash Flow','Cum Cash Flow','Delta NW','End NW','Liquid Net Worth','Assets','Liabilities'];
   if (cmp) headers.push('Compare Net Worth');
   if (mc)  headers.push('P10','P25','P50','P75','P90');
 
+  let cumCF = 0;
   const rows = det.map((r, i) => {
-    const delta = r.netWorth - (r.startNetWorth ?? r.netWorth);
+    const delta    = r.netWorth - (r.startNetWorth ?? r.netWorth);
+    const transfer = r.transferThisMonth ?? 0;
+    const cf       = (r.incomeThisMonth ?? 0) - (r.expenseThisMonth ?? 0);
+    cumCF += cf;
     const row = [
       vm === 'yearly' ? r.month : monthLabel(r.month),
       (r.startNetWorth ?? 0).toFixed(2),
       (r.incomeThisMonth ?? 0).toFixed(2),
       (r.expenseThisMonth ?? 0).toFixed(2),
+      transfer.toFixed(2),
+      cf.toFixed(2),
+      cumCF.toFixed(2),
       delta.toFixed(2),
       r.netWorth.toFixed(2), r.liquidNetWorth.toFixed(2),
-      r.assetTotal.toFixed(2), r.liabTotal.toFixed(2), r.cashFlow.toFixed(2),
+      r.assetTotal.toFixed(2), r.liabTotal.toFixed(2),
     ];
     if (cmp) row.push((cmp[i]?.netWorth ?? 0).toFixed(2));
     if (mc)  row.push(mc[i].p10.toFixed(2), mc[i].p25.toFixed(2), mc[i].p50.toFixed(2), mc[i].p75.toFixed(2), mc[i].p90.toFixed(2));
@@ -1956,11 +2269,12 @@ function confirmClear() {
 
 function buildSidebar() {
   const nav = [
-    { page: 'dashboard', icon: '⊞', label: 'Dashboard' },
-    { page: 'baselines', icon: '🏦', label: 'Baselines' },
-    { page: 'events',    icon: '📅', label: 'Events' },
-    { page: 'analysis',  icon: '📈', label: 'Analysis' },
-    { page: 'settings',  icon: '⚙',  label: 'Settings' },
+    { page: 'dashboard',  icon: '⊞', label: 'Dashboard' },
+    { page: 'baselines',  icon: '🏦', label: 'Baselines' },
+    { page: 'events',     icon: '📅', label: 'Events' },
+    { page: 'event-sets', icon: '🗂', label: 'Event Sets' },
+    { page: 'analysis',   icon: '📈', label: 'Analysis' },
+    { page: 'settings',   icon: '⚙',  label: 'Settings' },
   ];
   const activeNav = SIDEBAR_MAP[state.page] ?? state.page;
 

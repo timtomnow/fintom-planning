@@ -20,3 +20,4 @@ Desktop.ini
 finplan-backup-*.json
 forecast-*.csv
 financial-plan-export-*.json
+.app-template/
