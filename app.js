@@ -320,9 +320,9 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
     for (const a of assets) {
       if (a.isInvestment) {
         const annualPct = returnSampler ? returnSampler(a) : a.annualMeanReturn;
-        a.value = Math.max(0, a.value * (1 + annualPct / 12 / 100));
+        a.value = a.value * (1 + annualPct / 12 / 100);
       } else {
-        a.value = Math.max(0, a.value * (1 + (a.monthlyGrowthRate ?? 0) / 100));
+        a.value = a.value * (1 + (a.monthlyGrowthRate ?? 0) / 100);
       }
     }
 
@@ -356,7 +356,7 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
         l.value = Math.max(0, l.value - (payment - interest));
         const payAsset = l.paymentAssetName ? assetMap.get(l.paymentAssetName) : null;
         if (payAsset) {
-          payAsset.value = Math.max(0, payAsset.value - payment);
+          payAsset.value = payAsset.value - payment;
         } else {
           cashFlow -= payment;
         }
@@ -393,7 +393,7 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
         // Deduct from source asset or cash flow
           const srcAsset = ev.payFromAssetName ? assetMap.get(ev.payFromAssetName) : null;
           if (srcAsset) {
-            srcAsset.value = Math.max(0, srcAsset.value - amount);
+            srcAsset.value = srcAsset.value - amount;
           } else {
             cashFlow -= amount;
           }
@@ -425,7 +425,7 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
           // Deduct from source asset or cash flow
           const srcAsset = ev.payFromAssetName ? assetMap.get(ev.payFromAssetName) : null;
           if (srcAsset) {
-            srcAsset.value = Math.max(0, srcAsset.value - amount);
+            srcAsset.value = srcAsset.value - amount;
           } else {
             cashFlow -= amount;
           }
@@ -1045,7 +1045,7 @@ function openAssetModal(baselineId, assetId = null) {
     <div class="form-row">
       <div class="form-group">
         <label>Current Value ($)</label>
-        <input type="number" id="a-value" value="${a.value}" min="0" step="1000">
+        <input type="number" id="a-value" value="${a.value}" step="1000">
       </div>
       <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end;gap:10px;padding-bottom:2px;">
         <label class="checkbox-label"><input type="checkbox" id="a-liquid" ${a.isLiquid ? 'checked' : ''}> Liquid asset</label>
