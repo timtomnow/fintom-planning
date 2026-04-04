@@ -148,7 +148,7 @@ Each configuration stores the settings for one forecast run:
 
 ### Results
 
-Toggle between **Monthly** and **Yearly** view. Export the full table to **CSV**.
+Toggle between **Monthly** and **Yearly** view. Use **Re-Run** to re-run the analysis with any override changes applied. Export the full table to **CSV**.
 
 **Charts:**
 - **Net Worth Over Time** — single line (deterministic), or percentile bands (Monte Carlo). Compare baseline shown in green. Sustainability target shown in orange.
@@ -172,9 +172,19 @@ Toggle between **Monthly** and **Yearly** view. Export the full table to **CSV**
 
 > **Note on Δ NW vs Cash Flow:** Cash Flow ≠ Δ NW. The difference is asset appreciation (investment growth, property appreciation) which increases net worth without appearing in the cash flow columns.
 
+**Expandable period rows:**
+
+Every row in the detail table is clickable. Click any row to expand it and see which events were active in that period, along with their amounts and cash-flow impact (+income, −expense, 0 for transfers). You can **Edit** any event directly from the expanded view — edits are saved to this analysis only and do not affect the global Events page. You can also **+ Add Event** to any period.
+
+After editing, a warning banner appears at the top of the page indicating the results are out of date. Click **Re-run now** or the **Re-Run** button in the header to refresh.
+
 **Baseline Values Over Time table:**
 
 Below the detail table, a second table shows every asset, liability, and the accumulated cash flow with four columns: **Start**, **At Month** (interactive), **Change**, and **End**. Use the dropdown to pick any month in the forecast period — the "At Month" column updates instantly to show what each account balance or loan balance looks like at that point. Assets created by "Deposit into Asset" events that don't exist in the baseline are shown as **Asset (new)** rows starting from $0.
+
+**All Analysis Events table:**
+
+At the bottom of the Results page, a full list of all events used in the analysis is shown. It is paginated (25 rows per page) and can be filtered by event name (text search), category, and type using the filter controls above the table. Click **Export CSV** to download the full filtered list.
 
 ---
 

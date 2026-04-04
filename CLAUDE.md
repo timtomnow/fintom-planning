@@ -191,8 +191,14 @@ Event sets are named collections of events attached to a specific analysis confi
     numSimulations,           // typically 500–1000
     standardOfLivingMonthly, // $/mo; shown as 25× annual target line on chart
   },
+  eventOverrides: [],  // analysis-specific event edits/additions; do not affect global events
+  resultsStale: false, // true when overrides changed but analysis not yet re-run
 }
 ```
+
+`eventOverrides` — array of full Event objects. When running, these replace matching global events by ID and new IDs are appended. Managed via the expandable-row edit UI in the Results page. Global events on the Events page are never touched.
+
+`resultsStale` — set to `true` by `markResultsStale()` after any override change. Reset to `false` by `runAndView()`. When true, a warning banner is shown on the Results page with a re-run link.
 
 ---
 
@@ -265,6 +271,42 @@ All Chart.js instances are pushed to `state.activeCharts` and destroyed via `des
 ### Cash Flow Chart (`chart-cf`)
 
 Simple line chart of the engine `cashFlow` accumulator over time, fill to origin.
+
+---
+
+## Results Page Features
+
+### Expandable Detail Rows
+
+Each row in the Annual/Monthly Detail table has a chevron (▶/▼) and is clickable. Clicking calls `toggleEventDetail(key)` which shows/hides a hidden `<tr id="evd-{key}">` containing a sub-table of events active in that period.
+
+- **Monthly view**: shows events where `isEventActive(ev, month)` is true
+- **Yearly view**: aggregates events across all months in the year within the analysis range; sums amounts and cash flow per event ID
+- Each event row has an **Edit** button → `openOverrideEventModal(cfgId, ev.id, month)`
+- An **+ Add Event to this period** button → `openOverrideEventModal(cfgId, null, month)`
+
+`getEventsForPeriod(periodKey, viewMode, events, cfg)` computes the period event list with inflation-adjusted amounts and cash-flow signs.
+
+### Override Event Modal
+
+`openOverrideEventModal(cfgId, existingId, defaultMonth)` — opens a modal to edit or create an event scoped to a specific analysis config. Saves result to `cfg.eventOverrides`. After saving, calls `markResultsStale()` to show the stale warning banner. Does **not** touch `state.data.events`.
+
+`onOevTypeChange()` / `onOevRecChange()` — toggle visibility of conditional fields inside the override modal (same pattern as `onEvTypeChange` / `onEvRecChange`).
+
+### Stale Warning Banner
+
+`<div id="results-stale-banner">` — rendered in the Results page, hidden by default. Shown when `cfg.resultsStale` is true. `markResultsStale()` sets the flag, saves data, and reveals the banner via DOM. `reRunAnalysis()` calls `runAndView(cfg.id)`, which resets the flag before running.
+
+### All Analysis Events Table
+
+`renderEventsTableSection()` — renders the paginated, filterable events table at the bottom of the Results page into `<div id="ev-table-section">`. Module-level state:
+- `_evTableData` — populated from `resolveEffectiveEvents(cfg)` at render time
+- `_evTablePage` — current page index (0-based)
+- `_evTableCatFilter`, `_evTableTypeFilter` — `Set` of active filter values
+- `_evTableNameFilter` — text search string
+- `EV_PAGE_SIZE = 25`
+
+Filter dropdowns use `.ev-filter-dropdown` (absolute-positioned, `z-index:50`). `toggleEvFilterDD(id)` shows one and hides others. `_refreshEvTable()` re-renders just the `#ev-table-section` innerHTML without navigating.
 
 ---
 

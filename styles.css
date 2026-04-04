@@ -519,3 +519,34 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color:
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #d1d1d6; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+
+/* ── Events table filter dropdowns ── */
+.ev-filter-wrap { position: relative; }
+.ev-filter-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,.1);
+  padding: 8px;
+  min-width: 180px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.ev-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.ev-filter-item:hover { background: var(--bg); }
+
+/* ── Result row hover (expandable rows) ── */
+.result-row:hover td { background: var(--bg); }

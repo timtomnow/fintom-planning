@@ -115,6 +115,8 @@ function defaultAnalysisConfig() {
       enabled: false, numSimulations: 500,
       standardOfLivingMonthly: 0,
     },
+    eventOverrides: [], // analysis-specific event edits/additions; do not affect global events
+    resultsStale: false, // true when overrides changed but analysis not yet re-run
   };
 }
 
@@ -1977,11 +1979,74 @@ function resolveEventSets(setIds) {
   return state.data.events.filter(e => ids.has(e.id));
 }
 
+// Returns the effective event list for an analysis config: base events with overrides applied.
+// Overrides replace matching events by ID; overrides with new IDs are appended.
+function resolveEffectiveEvents(cfg) {
+  const base = resolveEventSets(cfg.eventSetIds);
+  const overrides = cfg.eventOverrides ?? [];
+  if (!overrides.length) return base;
+  const overrideMap = new Map(overrides.map(e => [e.id, e]));
+  const merged = base.map(e => overrideMap.has(e.id) ? overrideMap.get(e.id) : e);
+  const baseIds = new Set(base.map(e => e.id));
+  overrides.filter(e => !baseIds.has(e.id)).forEach(e => merged.push(e));
+  return merged;
+}
+
+// Returns events active in a given period along with their amounts and cash-flow impact.
+// periodKey: 'YYYY-MM' (monthly) or 'YYYY' (yearly). viewMode: 'monthly'|'yearly'.
+function getEventsForPeriod(periodKey, viewMode, events, cfg) {
+  const taxRate = cfg.taxRate ?? 0;
+  const calcCF = (ev, amount) => {
+    const isTransfer = (ev.type === 'expense' || ev.type === 'one_time_outflow')
+      && (ev.linkedAssetName || ev.linkedLiabilityName);
+    if (isTransfer) return 0;
+    if (ev.type === 'income') return amount * (1 - taxRate / 100);
+    if (ev.type === 'one_time_inflow') return amount;
+    return -amount; // expense / one_time_outflow
+  };
+  const inflated = (ev, month) => {
+    let amt = ev.amount;
+    if (ev.inflationAdjusted && cfg.inflationRate) {
+      amt *= Math.pow(1 + cfg.inflationRate / 12 / 100, monthsBetween(cfg.startDate, month));
+    }
+    return amt;
+  };
+
+  if (viewMode === 'monthly') {
+    return events
+      .filter(ev => isEventActive(ev, periodKey))
+      .map(ev => {
+        const amount = inflated(ev, periodKey);
+        return { ev, amount, cfAmount: calcCF(ev, amount) };
+      });
+  }
+
+  // Yearly: aggregate across all months in the year that fall within the analysis range
+  const months = Array.from({ length: 12 }, (_, i) =>
+    `${periodKey}-${String(i + 1).padStart(2, '0')}`)
+    .filter(m => m >= cfg.startDate && m <= cfg.endDate);
+  const byId = new Map();
+  for (const month of months) {
+    for (const ev of events) {
+      if (!isEventActive(ev, month)) continue;
+      const amount = inflated(ev, month);
+      if (!byId.has(ev.id)) byId.set(ev.id, { ev, amount: 0, cfAmount: 0 });
+      const entry = byId.get(ev.id);
+      entry.amount += amount;
+      entry.cfAmount += calcCF(ev, amount);
+    }
+  }
+  return [...byId.values()];
+}
+
 function runAndView(configId) {
   const cfg = state.data.analysisConfigs.find(c => c.id === configId);
   if (!cfg) return;
 
-  const primaryEvents = resolveEventSets(cfg.eventSetIds);
+  cfg.resultsStale = false;
+  saveData();
+
+  const primaryEvents = resolveEffectiveEvents(cfg);
   const hasCompare = cfg.compareBaselineId || cfg.compareEventSetIds?.length;
   const compareEvents = cfg.compareEventSetIds?.length
     ? resolveEventSets(cfg.compareEventSetIds)
@@ -2006,6 +2071,313 @@ function runAndView(configId) {
     state.lastRunConfig = cfg;
     navigate('results', { configId });
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RESULTS — HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+function reRunAnalysis() {
+  const cfg = state.lastRunConfig;
+  if (cfg) runAndView(cfg.id);
+}
+
+function markResultsStale() {
+  if (state.lastRunConfig) state.lastRunConfig.resultsStale = true;
+  saveData();
+  const banner = document.getElementById('results-stale-banner');
+  if (banner) banner.style.display = '';
+}
+
+function toggleEventDetail(key) {
+  const row = document.getElementById('evd-' + key);
+  const chev = document.getElementById('chev-' + key);
+  if (!row) return;
+  const open = row.style.display !== 'none';
+  row.style.display = open ? 'none' : '';
+  if (chev) chev.textContent = open ? '▶' : '▼';
+}
+
+function openOverrideEventModal(cfgId, existingId, defaultMonth) {
+  const cfg = state.data.analysisConfigs.find(c => c.id === cfgId);
+  if (!cfg) return;
+
+  // Find existing override first, then fall back to global event
+  const existingOverride = existingId ? (cfg.eventOverrides ?? []).find(e => e.id === existingId) : null;
+  const existingGlobal   = existingId ? state.data.events.find(e => e.id === existingId) : null;
+  const existing = existingOverride ?? existingGlobal;
+  const ev = existing ? { ...existing } : { ...defaultEvent(), startDate: defaultMonth ?? today() };
+
+  const allAssetNames = [...new Set(
+    state.data.baselines.flatMap(bl => (bl.assets ?? []).map(a => a.name).filter(Boolean))
+  )].sort();
+  const allLiabNames = [...new Set(
+    state.data.baselines.flatMap(bl => (bl.liabilities ?? []).map(l => l.name).filter(Boolean))
+  )].sort();
+  const assetOpts = (sel) => `<option value="">— None —</option>`
+    + allAssetNames.map(n => `<option${sel === n ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  const isInflow  = ev.type === 'income' || ev.type === 'one_time_inflow';
+  const isOutflow = ev.type === 'expense' || ev.type === 'one_time_outflow';
+
+  showModal(existing ? 'Edit Analysis Event' : 'Add Analysis Event', `
+    <div class="alert alert-info mb-4" style="font-size:12.5px;">
+      Changes here are saved to this analysis only and do not affect the global Events page.
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="oev-name" value="${esc(ev.name)}" placeholder="e.g., Monthly Salary">
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="oev-cat">${EVENT_CATEGORIES.map(c => `<option${ev.category === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Type</label>
+        <select id="oev-type" onchange="onOevTypeChange()">
+          <option value="income"          ${ev.type === 'income'           ? 'selected' : ''}>Income</option>
+          <option value="expense"         ${ev.type === 'expense'          ? 'selected' : ''}>Expense</option>
+          <option value="one_time_inflow" ${ev.type === 'one_time_inflow'  ? 'selected' : ''}>One-time Inflow</option>
+          <option value="one_time_outflow"${ev.type === 'one_time_outflow' ? 'selected' : ''}>One-time Outflow</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Amount ($)</label>
+        <input type="number" id="oev-amt" value="${ev.amount}" step="100">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="checkbox-label">
+        <input type="checkbox" id="oev-rec" ${ev.isRecurring ? 'checked' : ''} onchange="onOevRecChange()">
+        Recurring — happens every month
+      </label>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label id="oev-start-lbl">${ev.isRecurring ? 'Start Date' : 'Date'}</label>
+        <input type="month" id="oev-start" value="${ev.startDate}">
+      </div>
+      <div class="form-group" id="oev-end-wrap" ${!ev.isRecurring ? 'style="display:none"' : ''}>
+        <label>End Date <span class="label-note">(blank = indefinite)</span></label>
+        <input type="month" id="oev-end" value="${ev.endDate ?? ''}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="checkbox-label"><input type="checkbox" id="oev-inf" ${ev.inflationAdjusted ? 'checked' : ''}> Adjust for inflation</label>
+      </div>
+    </div>
+    <div class="form-group" id="oev-deposit-wrap"${isInflow ? '' : ' style="display:none"'}>
+      <label>Deposit into Asset <span class="label-note">(income / inflow only)</span></label>
+      <select id="oev-deposit-asset">${assetOpts(ev.depositToAssetName ?? '')}</select>
+    </div>
+    <div class="form-group" id="oev-pay-from-wrap"${isOutflow ? '' : ' style="display:none"'}>
+      <label>Pay from Asset <span class="label-note">(expense / outflow only)</span></label>
+      <select id="oev-pay-from-asset">${assetOpts(ev.payFromAssetName ?? '')}</select>
+    </div>
+    <div class="form-group" id="oev-link-wrap"${isOutflow ? '' : ' style="display:none"'}>
+      <label>Transfer to Asset <span class="label-note">(expense / outflow only)</span></label>
+      <select id="oev-link-asset">${assetOpts(ev.linkedAssetName ?? '')}</select>
+    </div>
+    <div class="form-group" id="oev-link-liab-wrap"${isOutflow ? '' : ' style="display:none"'}>
+      <label>Extra Payment to Liability <span class="label-note">(expense / outflow only)</span></label>
+      <select id="oev-link-liab"><option value="">— None —</option>${allLiabNames.map(n => `<option${(ev.linkedLiabilityName ?? '') === n ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
+    </div>
+  `, () => {
+    const name = document.getElementById('oev-name').value.trim();
+    if (!name) { showToast('Name is required', 'error'); return false; }
+    const startDate = document.getElementById('oev-start').value;
+    if (!startDate) { showToast('Date is required', 'error'); return false; }
+    const type = document.getElementById('oev-type').value;
+    const isOut = type === 'expense' || type === 'one_time_outflow';
+    const isIn  = type === 'income'  || type === 'one_time_inflow';
+    const updated = {
+      id: ev.id,
+      name,
+      category: document.getElementById('oev-cat').value,
+      type,
+      amount: parseFloat(document.getElementById('oev-amt').value) || 0,
+      stdDevAmount: 0,
+      isRecurring: document.getElementById('oev-rec').checked,
+      startDate,
+      endDate: document.getElementById('oev-end').value || '',
+      inflationAdjusted: document.getElementById('oev-inf').checked,
+      notes: '',
+      linkedAssetName:     isOut ? document.getElementById('oev-link-asset').value     : '',
+      depositToAssetName:  isIn  ? document.getElementById('oev-deposit-asset').value  : '',
+      payFromAssetName:    isOut ? document.getElementById('oev-pay-from-asset').value  : '',
+      linkedLiabilityName: isOut ? document.getElementById('oev-link-liab').value       : '',
+    };
+    if (!cfg.eventOverrides) cfg.eventOverrides = [];
+    const idx = cfg.eventOverrides.findIndex(e => e.id === updated.id);
+    if (idx >= 0) cfg.eventOverrides[idx] = updated;
+    else cfg.eventOverrides.push(updated);
+    markResultsStale();
+    showToast(existing ? 'Analysis event updated' : 'Analysis event added', 'success');
+    return true;
+  });
+}
+
+function onOevTypeChange() {
+  const type = document.getElementById('oev-type').value;
+  const isOut = type === 'expense' || type === 'one_time_outflow';
+  const isIn  = type === 'income'  || type === 'one_time_inflow';
+  const oneTime = type === 'one_time_inflow' || type === 'one_time_outflow';
+  document.getElementById('oev-deposit-wrap').style.display   = isIn  ? '' : 'none';
+  document.getElementById('oev-pay-from-wrap').style.display  = isOut ? '' : 'none';
+  document.getElementById('oev-link-wrap').style.display      = isOut ? '' : 'none';
+  document.getElementById('oev-link-liab-wrap').style.display = isOut ? '' : 'none';
+  if (oneTime) {
+    document.getElementById('oev-rec').checked = false;
+    document.getElementById('oev-end-wrap').style.display = 'none';
+  }
+}
+
+function onOevRecChange() {
+  const rec = document.getElementById('oev-rec').checked;
+  document.getElementById('oev-end-wrap').style.display = rec ? '' : 'none';
+  document.getElementById('oev-start-lbl').textContent   = rec ? 'Start Date' : 'Date';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EVENTS TABLE (issue #18) — module-level filter/page state
+// ═══════════════════════════════════════════════════════════════
+
+let _evTablePage = 0;
+let _evTableCatFilter  = new Set(); // empty = show all
+let _evTableTypeFilter = new Set(); // empty = show all
+let _evTableNameFilter = '';
+let _evTableData = []; // populated by renderResults
+
+const EV_PAGE_SIZE = 25;
+
+function renderEventsTableSection() {
+  const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out' }[t] ?? t);
+  const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time' }[t] ?? '');
+
+  const allCats  = [...new Set(_evTableData.map(e => e.category))].sort();
+  const allTypes = [...new Set(_evTableData.map(e => e.type))].sort();
+
+  const filtered = _evTableData.filter(e => {
+    if (_evTableNameFilter && !e.name.toLowerCase().includes(_evTableNameFilter.toLowerCase())) return false;
+    if (_evTableCatFilter.size  && !_evTableCatFilter.has(e.category))  return false;
+    if (_evTableTypeFilter.size && !_evTableTypeFilter.has(e.type))     return false;
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / EV_PAGE_SIZE));
+  const page = Math.min(_evTablePage, totalPages - 1);
+  const pageData = filtered.slice(page * EV_PAGE_SIZE, (page + 1) * EV_PAGE_SIZE);
+
+  const catDD = allCats.map(c => `<label class="ev-filter-item"><input type="checkbox" ${_evTableCatFilter.has(c) ? 'checked' : ''} onchange="evTableFilter('cat','${esc(c)}',this.checked)"> ${esc(c)}</label>`).join('');
+  const typeDD = allTypes.map(t => `<label class="ev-filter-item"><input type="checkbox" ${_evTableTypeFilter.has(t) ? 'checked' : ''} onchange="evTableFilter('type','${esc(t)}',this.checked)"> ${typeLabel(t)}</label>`).join('');
+
+  const rows = pageData.map(e => `<tr>
+    <td><strong>${esc(e.name)}</strong>${e.notes ? `<br><span class="text-muted" style="font-size:11px;">${esc(e.notes)}</span>` : ''}</td>
+    <td class="text-muted">${esc(e.category)}</td>
+    <td><span class="badge ${badgeClass(e.type)}">${typeLabel(e.type)}</span></td>
+    <td class="text-right font-mono">${fmt$(e.amount)}</td>
+    <td class="nowrap" style="font-size:12px;">${monthLabel(e.startDate)}</td>
+    <td class="nowrap" style="font-size:12px;">${e.endDate ? monthLabel(e.endDate) : (e.isRecurring ? 'Ongoing' : '—')}</td>
+    <td>${e.isRecurring && e.type !== 'one_time_inflow' && e.type !== 'one_time_outflow' ? '✓' : '<span class="text-muted">—</span>'}</td>
+    <td>${e.inflationAdjusted ? '✓' : '<span class="text-muted">—</span>'}</td>
+  </tr>`).join('');
+
+  const pagerHtml = totalPages > 1 ? `
+    <div class="flex items-center gap-2 mt-3" style="font-size:13px;">
+      <button class="btn btn-sm btn-ghost" onclick="evTablePage(${page - 1})" ${page === 0 ? 'disabled' : ''}>← Prev</button>
+      <span class="text-muted">Page ${page + 1} of ${totalPages} &nbsp;(${filtered.length} events)</span>
+      <button class="btn btn-sm btn-ghost" onclick="evTablePage(${page + 1})" ${page >= totalPages - 1 ? 'disabled' : ''}>Next →</button>
+    </div>` : `<div class="text-muted mt-2" style="font-size:13px;">${filtered.length} event${filtered.length !== 1 ? 's' : ''}</div>`;
+
+  return `
+    <div class="section-header" style="margin-bottom:12px;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+      <div class="section-title">All Analysis Events</div>
+      <div class="flex gap-2 flex-wrap items-center">
+        <input type="search" placeholder="Search name…" value="${esc(_evTableNameFilter)}"
+          oninput="evTableNameSearch(this.value)"
+          style="width:160px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+        <div class="ev-filter-wrap">
+          <button class="btn btn-sm btn-ghost" onclick="toggleEvFilterDD('ev-dd-cat')">Category${_evTableCatFilter.size ? ` (${_evTableCatFilter.size})` : ''} ▾</button>
+          <div id="ev-dd-cat" class="ev-filter-dropdown" style="display:none;">${catDD}</div>
+        </div>
+        <div class="ev-filter-wrap">
+          <button class="btn btn-sm btn-ghost" onclick="toggleEvFilterDD('ev-dd-type')">Type${_evTableTypeFilter.size ? ` (${_evTableTypeFilter.size})` : ''} ▾</button>
+          <div id="ev-dd-type" class="ev-filter-dropdown" style="display:none;">${typeDD}</div>
+        </div>
+        ${(_evTableCatFilter.size || _evTableTypeFilter.size || _evTableNameFilter)
+          ? `<button class="btn btn-sm btn-ghost text-negative" onclick="evTableClearFilters()">Clear filters</button>` : ''}
+        <button class="btn btn-sm btn-secondary" onclick="exportEventsCSV()">Export CSV</button>
+      </div>
+    </div>
+    <div class="result-table-wrap">
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Category</th><th>Type</th>
+          <th class="text-right">Amount</th>
+          <th>Start</th><th>End</th><th>Recurring</th><th>Inflation Adj.</th>
+        </tr></thead>
+        <tbody id="ev-table-body">${rows}</tbody>
+      </table>
+    </div>
+    ${pagerHtml}`;
+}
+
+function toggleEvFilterDD(id) {
+  // Close all other dropdowns first
+  document.querySelectorAll('.ev-filter-dropdown').forEach(el => {
+    if (el.id !== id) el.style.display = 'none';
+  });
+  const dd = document.getElementById(id);
+  if (dd) dd.style.display = dd.style.display === 'none' ? '' : 'none';
+}
+
+function evTableFilter(col, value, checked) {
+  if (col === 'cat')  { checked ? _evTableCatFilter.add(value)  : _evTableCatFilter.delete(value); }
+  if (col === 'type') { checked ? _evTableTypeFilter.add(value) : _evTableTypeFilter.delete(value); }
+  _evTablePage = 0;
+  _refreshEvTable();
+}
+
+function evTableNameSearch(val) {
+  _evTableNameFilter = val;
+  _evTablePage = 0;
+  _refreshEvTable();
+}
+
+function evTablePage(p) {
+  _evTablePage = p;
+  _refreshEvTable();
+}
+
+function evTableClearFilters() {
+  _evTableCatFilter.clear();
+  _evTableTypeFilter.clear();
+  _evTableNameFilter = '';
+  _evTablePage = 0;
+  _refreshEvTable();
+}
+
+function _refreshEvTable() {
+  const wrap = document.getElementById('ev-table-section');
+  if (wrap) wrap.innerHTML = renderEventsTableSection();
+}
+
+function exportEventsCSV() {
+  const rows = [['Name','Category','Type','Amount','StdDev','StartDate','EndDate','Recurring','InflationAdj','Notes']];
+  for (const e of _evTableData) {
+    rows.push([e.name, e.category, e.type, e.amount, e.stdDevAmount ?? 0,
+      e.startDate, e.endDate ?? '', e.isRecurring ? 'Yes' : 'No',
+      e.inflationAdjusted ? 'Yes' : 'No', e.notes ?? '']);
+  }
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: 'analysis-events.csv' });
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2038,6 +2410,48 @@ function renderResults() {
 
   const mcFinal = mc ? mc[mc.length - 1] : null;
 
+  // Populate events table data before rendering
+  _evTableData = resolveEffectiveEvents(cfg);
+  _evTablePage = 0;
+
+  const numCols = 12 + (cmp ? 1 : 0) + (mc ? 3 : 0);
+  const effectiveEvents = _evTableData;
+  const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out' }[t] ?? t);
+  const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time' }[t] ?? '');
+
+  const renderPeriodEvents = (periodKey) => {
+    const periodEvs = getEventsForPeriod(periodKey, vm, effectiveEvents, cfg);
+    if (!periodEvs.length) {
+      return `<div style="padding:8px 16px 12px;font-size:13px;color:var(--text-muted);">No events in this period.
+        <button class="btn btn-sm btn-ghost" style="margin-left:8px;" onclick="openOverrideEventModal('${esc(cfg.id)}',null,'${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">+ Add Event</button>
+      </div>`;
+    }
+    const evRows = periodEvs.map(({ ev, amount, cfAmount }) => `<tr>
+      <td style="padding:5px 8px;">${esc(ev.name)}</td>
+      <td style="padding:5px 8px;" class="text-muted">${esc(ev.category)}</td>
+      <td style="padding:5px 8px;"><span class="badge ${badgeClass(ev.type)}">${typeLabel(ev.type)}</span></td>
+      <td style="padding:5px 8px;" class="text-right font-mono">${fmt$(amount)}</td>
+      <td style="padding:5px 8px;" class="text-right font-mono ${cfAmount > 0 ? 'text-positive' : cfAmount < 0 ? 'text-negative' : 'text-muted'}">${cfAmount === 0 ? '—' : (cfAmount > 0 ? '+' : '') + fmt$(cfAmount)}</td>
+      <td style="padding:5px 8px;">
+        <button class="btn btn-sm btn-ghost" onclick="openOverrideEventModal('${esc(cfg.id)}','${esc(ev.id)}','${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">Edit</button>
+      </td>
+    </tr>`).join('');
+    return `<div style="padding:6px 12px 12px;">
+      <table style="font-size:12.5px;width:100%;border-collapse:collapse;">
+        <thead><tr style="border-bottom:1px solid var(--border);">
+          <th style="padding:5px 8px;text-align:left;font-weight:600;">Name</th>
+          <th style="padding:5px 8px;text-align:left;font-weight:600;">Category</th>
+          <th style="padding:5px 8px;text-align:left;font-weight:600;">Type</th>
+          <th style="padding:5px 8px;text-align:right;font-weight:600;">Amount</th>
+          <th style="padding:5px 8px;text-align:right;font-weight:600;">Cash Flow</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${evRows}</tbody>
+      </table>
+      <button class="btn btn-sm btn-ghost" style="margin-top:6px;font-size:12px;" onclick="openOverrideEventModal('${esc(cfg.id)}',null,'${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">+ Add Event to this period</button>
+    </div>`;
+  };
+
   return `<div class="page">
     <div class="page-header">
       <div>
@@ -2052,9 +2466,16 @@ function renderResults() {
           <button class="toggle-btn${vm === 'monthly' ? ' active' : ''}" onclick="setViewMode('monthly')">Monthly</button>
           <button class="toggle-btn${vm === 'yearly'  ? ' active' : ''}" onclick="setViewMode('yearly')">Yearly</button>
         </div>
+        <button class="btn btn-primary btn-sm" onclick="reRunAnalysis()">Re-Run</button>
         <button class="btn btn-secondary btn-sm" onclick="exportCSV()">Export CSV</button>
         <button class="btn btn-secondary btn-sm" onclick="navigate('analysis')">← Back</button>
       </div>
+    </div>
+
+    <!-- Stale warning banner -->
+    <div id="results-stale-banner" class="alert alert-warning mb-4" ${cfg.resultsStale ? '' : 'style="display:none"'}>
+      Analysis results are out of date — event overrides have been changed.
+      <a href="#" onclick="reRunAnalysis();return false;" style="margin-left:8px;font-weight:600;">Re-run now →</a>
     </div>
 
     <!-- Summary stats -->
@@ -2144,8 +2565,12 @@ function renderResults() {
               const cf       = (r.incomeThisMonth ?? 0) - (r.expenseThisMonth ?? 0);
               const cumCF    = acc.cumCF + cf;
               acc.cumCF = cumCF;
-              acc.html += `<tr>
-              <td class="nowrap">${vm === 'yearly' ? r.month : monthLabel(r.month)}</td>
+              const key = r.month; // 'YYYY-MM' or 'YYYY'
+              acc.html += `<tr class="result-row" style="cursor:pointer;" onclick="toggleEventDetail('${key}')">
+              <td class="nowrap">
+                <span id="chev-${key}" style="display:inline-block;width:14px;font-size:9px;color:var(--text-muted);vertical-align:middle;">▶</span>
+                ${vm === 'yearly' ? r.month : monthLabel(r.month)}
+              </td>
               <td class="text-right font-mono text-muted">${fmt$(r.startNetWorth ?? 0)}</td>
               <td class="text-right font-mono text-positive">${fmt$(r.incomeThisMonth ?? 0)}</td>
               <td class="text-right font-mono text-negative">${fmt$(r.expenseThisMonth ?? 0)}</td>
@@ -2163,6 +2588,11 @@ function renderResults() {
                 <td class="text-right font-mono">${fmt$(mc[i]?.p50)}</td>
                 <td class="text-right font-mono">${fmt$(mc[i]?.p90)}</td>
               ` : ''}
+            </tr>
+            <tr id="evd-${key}" style="display:none;">
+              <td colspan="${numCols}" style="padding:0;background:var(--bg,#f8f9fb);border-bottom:1px solid var(--border);">
+                ${renderPeriodEvents(key)}
+              </td>
             </tr>`;
               return acc;
             }, { html: '', cumCF: 0 }).html}
@@ -2245,6 +2675,12 @@ function renderResults() {
         </div>
       </div>`;
     })()}
+
+    <!-- All Analysis Events table (issue #18) -->
+    <div class="card" style="margin-top:20px;" id="ev-table-section">
+      ${renderEventsTableSection()}
+    </div>
+
   </div>`;
 }
 
