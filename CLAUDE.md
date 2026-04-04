@@ -8,7 +8,7 @@ This is a self-contained, single-page financial planning app. No framework, no b
 
 | File | Purpose |
 |---|---|
-| `index.html` | Shell. Loads Chart.js CDN, marked.js CDN, `styles.css`, `app.js`. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. Also embeds doc content in `script[type="text/x-markdown"]` tags (`#doc-readme`, `#doc-claude`) for the in-app help modal. |
+| `index.html` | Shell. Loads Chart.js CDN, marked.js CDN, `styles.css`, `app.js`. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. |
 | `styles.css` | Full design system. CSS variables in `:root`. No external dependencies. |
 | `app.js` | Everything else — state, data, forecast engine, Monte Carlo, all page renders, charts, modals, routing, help modal. |
 | `README.md` | End-user instructions (Markdown). |
@@ -283,7 +283,7 @@ All dates stored as `'YYYY-MM'` strings. `monthLabel('2026-04')` → `'Apr 2026'
 
 ### Help Modal
 
-`showHelpModal(tab)` — opens a wide modal (`modal-wide` class, 760px) with two tabs: **User Guide** and **Developer Guide**. Content is read from `script[type="text/x-markdown"]` elements in `index.html` (`#doc-readme` and `#doc-claude`) and rendered with `marked.parse()`. Falls back to `<pre>` display if marked is unavailable.
+`showHelpModal(tab)` — async. Opens a wide modal (`modal-wide` class, 760px) with two tabs: **User Guide** and **Developer Guide**. Fetches `./README.md` and `./CLAUDE.md` via `fetch()` and renders them with `marked.parse()`. Shows a loading placeholder while fetching; shows an error message if fetch fails (e.g. opened as `file://`). Falls back to `<pre>` display if marked is unavailable.
 
 `switchHelpTab(tab)` — toggles visibility of `#help-readme` / `#help-claude` divs and updates `.active` class on the tab buttons.
 
@@ -318,3 +318,14 @@ LIABILITY_CATEGORIES  // array of strings
 EVENT_CATEGORIES      // array of strings
 SIDEBAR_MAP           // { 'baseline-detail': 'baselines', 'event-set-detail': 'event-sets', 'results': 'analysis' }
 ```
+
+---
+
+## Documentation Policy
+
+When making any change to app functionality, the data model, UI patterns, or architecture, update **both** documentation files:
+
+1. **`README.md`** — user-facing. Update any section affected by the change (features, how the forecast works, tips, column descriptions, etc.).
+2. **`CLAUDE.md`** — developer-facing. Update the relevant data model, engine, chart, or UI pattern section to reflect the new behaviour.
+
+`README.md` and `CLAUDE.md` are the single source of truth. The in-app help modal fetches them directly via `fetch()` — there is no embedded copy in `index.html` to update.

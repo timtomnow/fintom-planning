@@ -554,12 +554,11 @@ function hideModal() {
   document.getElementById('modal').classList.remove('modal-wide');
 }
 
-function showHelpModal(tab = 'readme') {
-  const readmeMd = document.getElementById('doc-readme')?.textContent ?? 'Documentation not found.';
-  const claudeMd = document.getElementById('doc-claude')?.textContent ?? 'Documentation not found.';
+async function showHelpModal(tab = 'readme') {
   const render = md => typeof marked !== 'undefined'
     ? marked.parse(md)
     : `<pre style="white-space:pre-wrap;font-size:12.5px;">${esc(md)}</pre>`;
+  const errHtml = '<p style="color:var(--danger)">Could not load documentation. Help requires the app to be served over HTTP.</p><p>To develop locally, run this from the project folder:</p><pre style="background:var(--bg-secondary);padding:8px 12px;border-radius:6px;font-size:13px;">python3 -m http.server 8080</pre><p>Then open <a href="http://localhost:8080" target="_blank">http://localhost:8080</a></p>';
 
   document.getElementById('modal').innerHTML = `
     <div class="modal-header">
@@ -571,13 +570,26 @@ function showHelpModal(tab = 'readme') {
       <button class="help-tab-btn${tab === 'claude' ? ' active' : ''}" onclick="switchHelpTab('claude')">Developer Guide</button>
     </div>
     <div class="help-content" id="help-readme" ${tab !== 'readme' ? 'style="display:none"' : ''}>
-      ${render(readmeMd)}
+      <p style="color:var(--text-muted)">Loading…</p>
     </div>
     <div class="help-content" id="help-claude" ${tab !== 'claude' ? 'style="display:none"' : ''}>
-      ${render(claudeMd)}
+      <p style="color:var(--text-muted)">Loading…</p>
     </div>`;
   document.getElementById('modal').classList.add('modal-wide');
   document.getElementById('modal-overlay').classList.add('open');
+
+  const load = async (url, elId) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(res.statusText);
+      document.getElementById(elId).innerHTML = render(await res.text());
+    } catch {
+      document.getElementById(elId).innerHTML = errHtml;
+    }
+  };
+
+  load('./README.md', 'help-readme');
+  load('./CLAUDE.md', 'help-claude');
 }
 
 function switchHelpTab(tab) {
