@@ -191,7 +191,9 @@ function onOevRecChange() {
 let _evTablePage = 0;
 let _evTableCatFilter  = new Set(); // empty = show all
 let _evTableTypeFilter = new Set(); // empty = show all
-let _evTableNameFilter = '';
+let _evTableNameFilter = '';        // applied filter (search committed)
+let _evTableNameInput  = '';        // pending input value (not yet applied)
+let _evTableSortAsc    = true;      // true = oldest first, false = newest first
 let _evTableData = []; // populated by renderResults
 
 const EV_PAGE_SIZE = 25;
@@ -234,9 +236,14 @@ function renderEventsTableSection() {
     return true;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / EV_PAGE_SIZE));
+  const sorted = filtered.slice().sort((a, b) => {
+    const cmp = a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0;
+    return _evTableSortAsc ? cmp : -cmp;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / EV_PAGE_SIZE));
   const page = Math.min(_evTablePage, totalPages - 1);
-  const pageData = filtered.slice(page * EV_PAGE_SIZE, (page + 1) * EV_PAGE_SIZE);
+  const pageData = sorted.slice(page * EV_PAGE_SIZE, (page + 1) * EV_PAGE_SIZE);
 
   const catDD = allCats.map(c => `<label class="ev-filter-item"><input type="checkbox" ${_evTableCatFilter.has(c) ? 'checked' : ''} onchange="evTableFilter('cat','${esc(c)}',this.checked)"> ${esc(c)}</label>`).join('');
   const typeDD = allTypes.map(t => `<label class="ev-filter-item"><input type="checkbox" ${_evTableTypeFilter.has(t) ? 'checked' : ''} onchange="evTableFilter('type','${esc(t)}',this.checked)"> ${typeLabel(t)}</label>`).join('');
@@ -260,17 +267,22 @@ function renderEventsTableSection() {
   const pagerHtml = totalPages > 1 ? `
     <div class="flex items-center gap-2 mt-3" style="font-size:13px;">
       <button class="btn btn-sm btn-ghost" onclick="evTablePage(${page - 1})" ${page === 0 ? 'disabled' : ''}>← Prev</button>
-      <span class="text-muted">Page ${page + 1} of ${totalPages} &nbsp;(${filtered.length} events)</span>
+      <span class="text-muted">Page ${page + 1} of ${totalPages} &nbsp;(${sorted.length} events)</span>
       <button class="btn btn-sm btn-ghost" onclick="evTablePage(${page + 1})" ${page >= totalPages - 1 ? 'disabled' : ''}>Next →</button>
-    </div>` : `<div class="text-muted mt-2" style="font-size:13px;">${filtered.length} event${filtered.length !== 1 ? 's' : ''}</div>`;
+    </div>` : `<div class="text-muted mt-2" style="font-size:13px;">${sorted.length} event${sorted.length !== 1 ? 's' : ''}</div>`;
 
   return `
     <div class="section-header" style="margin-bottom:12px;align-items:flex-start;gap:12px;flex-wrap:wrap;">
       <div class="section-title">All Analysis Events</div>
       <div class="flex gap-2 flex-wrap items-center">
-        <input type="search" placeholder="Search name…" value="${esc(_evTableNameFilter)}"
-          oninput="evTableNameSearch(this.value)"
-          style="width:160px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+        <div style="display:flex;align-items:center;gap:0;">
+          <input type="search" id="ev-name-input" placeholder="Search name…" value="${esc(_evTableNameInput)}"
+            oninput="evTableNameInputChange(this.value)"
+            onkeydown="if(event.key==='Enter')evTableNameCommit()"
+            style="width:140px;padding:5px 8px;border:1px solid var(--border);border-radius:6px 0 0 6px;font-size:13px;">
+          <button onclick="evTableNameCommit()" title="Search"
+            style="padding:5px 8px;border:1px solid var(--border);border-left:none;border-radius:0 6px 6px 0;background:var(--surface2);cursor:pointer;font-size:13px;line-height:1;">&#128269;</button>
+        </div>
         <div class="ev-filter-wrap">
           <button class="btn btn-sm btn-ghost" onclick="toggleEvFilterDD('ev-dd-cat')">Category${_evTableCatFilter.size ? ` (${_evTableCatFilter.size})` : ''} ▾</button>
           <div id="ev-dd-cat" class="ev-filter-dropdown" style="display:none;">${catDD}</div>
@@ -287,7 +299,8 @@ function renderEventsTableSection() {
     <div class="result-table-wrap">
       <table>
         <thead><tr>
-          <th>Month</th><th>Name</th><th>Category</th><th>Type</th>
+          <th style="cursor:pointer;white-space:nowrap;" onclick="evTableToggleSort()">Month <span style="font-size:11px;">${_evTableSortAsc ? '▲' : '▼'}</span></th>
+          <th>Name</th><th>Category</th><th>Type</th>
           <th class="text-right">Amount</th>
           <th class="text-right">Cash Flow</th>
           <th></th>
@@ -314,8 +327,18 @@ function evTableFilter(col, value, checked) {
   _refreshEvTable();
 }
 
-function evTableNameSearch(val) {
-  _evTableNameFilter = val;
+function evTableNameInputChange(val) {
+  _evTableNameInput = val;
+}
+
+function evTableNameCommit() {
+  _evTableNameFilter = _evTableNameInput;
+  _evTablePage = 0;
+  _refreshEvTable();
+}
+
+function evTableToggleSort() {
+  _evTableSortAsc = !_evTableSortAsc;
   _evTablePage = 0;
   _refreshEvTable();
 }
@@ -329,6 +352,7 @@ function evTableClearFilters() {
   _evTableCatFilter.clear();
   _evTableTypeFilter.clear();
   _evTableNameFilter = '';
+  _evTableNameInput  = '';
   _evTablePage = 0;
   _refreshEvTable();
 }

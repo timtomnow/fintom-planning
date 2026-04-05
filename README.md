@@ -205,7 +205,11 @@ Below the detail table, a second table shows every asset, liability, and the acc
 
 #### Event Details tab
 
-A full list of all events used in the analysis, including one row per monthly loan payment for each amortizing liability. It is paginated (25 rows per page) and can be filtered by event name (text search), category, and type.
+A full list of all events used in the analysis, including one row per monthly loan payment for each amortizing liability. It is paginated (25 rows per page) and can be filtered and sorted.
+
+**Sorting:** Click the **Month** column header (▲/▼) to toggle between oldest-first and newest-first order. The sort direction indicator updates in the header.
+
+**Name search:** Type in the search box and click the **🔍** button (or press Enter) to apply the filter. The table does not refresh on every keystroke — the filter is only applied when you commit it. Click **Clear filters** to reset all active filters including the search.
 
 Columns: **Month** (when the event occurs), **Name**, **Category**, **Type**, **Amount**, **Cash Flow** (actual impact on the cash accumulator), and an **Edit** button. The Cash Flow column accounts for asset routing — events sent to or paid from an asset show `—` rather than a misleading cash impact.
 
@@ -261,3 +265,17 @@ Each month the engine:
 - Use the **sustainability target line** to see when your portfolio could sustain your lifestyle indefinitely.
 - **Duplicate a baseline** to model scenarios side-by-side — compare them using the "Compare Baseline" setting in an analysis configuration.
 - Use **Event Sets** to model scenario-specific events (e.g. a job change, an inheritance) without cluttering your global event list.
+
+---
+
+## Sample Data
+
+The `sample_data/` folder contains three ready-to-import example files that demonstrate different levels of plan complexity. Use them to explore the app or as a starting point for your own plan.
+
+To load a file: **Settings → Import Data (JSON)** → select the file. **This will replace your current data.**
+
+| File | Scenario | Highlights |
+|---|---|---|
+| `01-simple.json` | Single person, basic 5-year outlook | One baseline, a handful of income and expense events, one analysis config |
+| `02-moderate.json` | Household with a car-purchase decision | Two baselines (with car / without car), a scenario comparison config, one event set, Monte Carlo enabled |
+| `03-complex.json` | Family with mortgage and long-term planning | Full mortgage with term renewal and amortization, 14 events, two analysis configs (25-year Monte Carlo and 5-year near-term), one event set |

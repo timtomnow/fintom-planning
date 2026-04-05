@@ -365,12 +365,18 @@ When `existingId` is a per-month expansion of a recurring event (ID `monthly-${s
 
 ### All Analysis Events Table
 
-`renderEventsTableSection()` — renders the paginated, filterable events table at the bottom of the Results page into `<div id="ev-table-section">`. Module-level state:
+`renderEventsTableSection()` — renders the paginated, filterable, sortable events table at the bottom of the Results page into `<div id="ev-table-section">`. Module-level state:
 - `_evTableData` — built in `renderResults`: recurring events from `resolveEffectiveEvents(cfg)` are expanded into per-month entries (one row per active month, with inflation pre-applied), one-time events are included once, and synthetic `loan_payment` entries are appended (one per month per amortizing liability). Each per-month recurring row has a synthetic ID `monthly-${ev.id}-${month}`, `_sourceId = ev.id`, `_month = month`, `isRecurring: false`, `inflationAdjusted: false`.
 - `_evTablePage` — current page index (0-based)
 - `_evTableCatFilter`, `_evTableTypeFilter` — `Set` of active filter values
-- `_evTableNameFilter` — text search string
+- `_evTableNameFilter` — committed text search string (applied to the table)
+- `_evTableNameInput` — pending text search string (typed but not yet committed; used to preserve input value on re-render without triggering a filter change)
+- `_evTableSortAsc` — `true` = oldest first (default), `false` = newest first; toggled by `evTableToggleSort()`
 - `EV_PAGE_SIZE = 25`
+
+**Sorting** — after filtering, `filtered.slice().sort(...)` sorts by `startDate` string comparison. `_evTableSortAsc` flips the comparison direction. Sort order is shown as ▲/▼ in the Month column header. Clicking the header calls `evTableToggleSort()`, which flips the flag, resets page to 0, and calls `_refreshEvTable()`.
+
+**Name search** — the search input (`#ev-name-input`) uses `oninput` to call `evTableNameInputChange(val)` which only updates `_evTableNameInput` (no re-render). The filter is committed (applied to `_evTableNameFilter`) when the user clicks the 🔍 button (`evTableNameCommit()`) or presses Enter in the input. This avoids a full table re-render on every keystroke. `evTableClearFilters()` resets both `_evTableNameFilter` and `_evTableNameInput`.
 
 **Synthetic loan payment entries** — each has:
 ```js
@@ -480,6 +486,20 @@ The `?` button is rendered in the sidebar logo area via `buildSidebar()` — it'
 2. Update the modal form (add input, read it in `onSave`).
 3. Update the forecast engine or display logic as needed.
 4. Existing records without the field will get `undefined` — use `?? defaultValue` defensively in any code that reads it.
+
+---
+
+## Sample Data
+
+The `sample_data/` directory contains three importable JSON files for demo and onboarding:
+
+| File | Description |
+|---|---|
+| `01-simple.json` | Single baseline, 5 events, one analysis config — good for a quick smoke test |
+| `02-moderate.json` | Two baselines (car / no car), 7 events, one event set, comparison + Monte Carlo configs |
+| `03-complex.json` | One baseline with full mortgage amortization, 14 events, one event set, two analysis configs |
+
+These files conform to the `state.data` shape (`version`, `baselines`, `events`, `eventSets`, `analysisConfigs`, `settings`). They are loaded via **Settings → Import Data (JSON)** — importing replaces the current `localStorage` state.
 
 ---
 
