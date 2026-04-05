@@ -107,6 +107,7 @@ function defaultAnalysisConfig() {
   return {
     id: uuid(), name: 'New Analysis',
     baselineId: '', compareBaselineId: '',
+    scenarioTitle: '', compareScenarioTitle: '',
     eventSetIds: [],
     compareEventSetIds: [],
     startDate: today(), endDate: addMonths(today(), 120),

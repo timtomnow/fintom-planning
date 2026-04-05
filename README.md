@@ -134,7 +134,9 @@ Each configuration stores the settings for one forecast run:
 | Setting | Description |
 |---|---|
 | **Primary Baseline** | Starting point for the forecast |
+| **Scenario Title** | Optional short label for the primary scenario (shown on toggles and charts; falls back to baseline name) |
 | **Compare Baseline** | Optional second baseline shown as a second line on the chart |
+| **Compare Scenario Title** | Optional short label for the compare scenario (shown on toggles and charts; falls back to compare baseline name) |
 | **Primary Event Set** | Optional set of events merged with global events for the primary forecast |
 | **Compare Event Set** | Optional set of events merged with global events for the compare forecast |
 | **Period** | Start and end month for the forecast |
@@ -155,7 +157,7 @@ Each configuration stores the settings for one forecast run:
 
 Toggle between **Monthly** and **Yearly** view. Use **Re-Run** to re-run the analysis with any override changes applied. Export the full table to **CSV**.
 
-The Results page is divided into three tabs:
+The Results page is divided into five tabs:
 
 ---
 
@@ -244,6 +246,18 @@ The chart uses the monthly engine results directly — no recalculation is neede
 Shows every asset, liability, and the accumulated cash flow with four columns: **Start**, **At Month** (interactive), **Change (total)**, and **End**. Use the "At month:" dropdown to pick any month in the forecast period — the "At Month" column updates instantly to show each account or loan balance at that point. Assets created by "Deposit into Asset" events that don't exist in the baseline are shown as **Asset (new)** rows starting from $0.
 
 **Compare scenario:** When the analysis has a Compare Scenario, two tables are stacked — one for each scenario, each with its own independent "At month:" dropdown.
+
+---
+
+#### Analysis Config tab
+
+Shows a full breakdown of exactly what was included in the run:
+
+- **Configuration summary** — config name, period, inflation rate, tax rate, Monte Carlo settings, and number of event overrides.
+- **Primary Scenario card** — the scenario title (if set), baseline name and date, a table of every asset in the baseline (value, growth model, liquidity), a table of every liability (balance, interest rate, amortization details), and a table of all events included in the run.
+- **Compare Scenario card** *(when a compare scenario exists)* — same breakdown for the compare scenario, including which baseline and event sets were used.
+
+Use this tab to audit the exact inputs behind any set of results without having to navigate back to the Analysis page.
 
 ---
 

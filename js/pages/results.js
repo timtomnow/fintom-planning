@@ -214,6 +214,8 @@ function renderEventsTableSection() {
   const run = state.lastRun;
   const pBl = cfg ? state.data.baselines.find(b => b.id === cfg.baselineId) : null;
   const cBl = cfg ? state.data.baselines.find(b => b.id === cfg.compareBaselineId) : null;
+  const pLabel = cfg?.scenarioTitle || pBl?.name || 'Base Scenario';
+  const cLabel = cfg?.compareScenarioTitle || cBl?.name || 'Compare Scenario';
   const hasCompare = !!(run?.cmpResults && cfg && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
   const showCmp = hasCompare && _evTableScenario === 'compare';
   const tableData = showCmp ? _cmpEvTableData : _evTableData;
@@ -270,12 +272,12 @@ function renderEventsTableSection() {
     ${hasCompare ? `<div class="flex items-center gap-2 mb-4" style="padding-bottom:12px;border-bottom:1px solid var(--border);">
       <span style="font-size:13px;color:var(--text-muted);">Scenario:</span>
       <div class="toggle-group">
-        <button class="toggle-btn${!showCmp ? ' active' : ''}" onclick="switchEvTableScenario('base')">${esc(pBl?.name ?? 'Base Scenario')}</button>
-        <button class="toggle-btn${showCmp ? ' active' : ''}" onclick="switchEvTableScenario('compare')">${esc(cBl?.name ?? 'Compare Scenario')}</button>
+        <button class="toggle-btn${!showCmp ? ' active' : ''}" onclick="switchEvTableScenario('base')">${esc(pLabel)}</button>
+        <button class="toggle-btn${showCmp ? ' active' : ''}" onclick="switchEvTableScenario('compare')">${esc(cLabel)}</button>
       </div>
     </div>` : ''}
     <div class="section-header" style="margin-bottom:12px;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-      <div class="section-title">All Analysis Events${showCmp ? ` — ${esc(cBl?.name ?? 'Compare Scenario')}` : ''}</div>
+      <div class="section-title">All Analysis Events${showCmp ? ` — ${esc(cLabel)}` : ''}</div>
       <div class="flex gap-2 flex-wrap items-center">
         <div style="display:flex;align-items:center;gap:0;">
           <input type="search" id="ev-name-input" placeholder="Search name…" value="${esc(_evTableNameInput)}"
@@ -412,7 +414,7 @@ function exportEventsCSV() {
 
 function switchResultsTab(tab) {
   _resultsTab = tab;
-  ['overview', 'events', 'balance-review', 'baseline-values'].forEach(t => {
+  ['overview', 'events', 'balance-review', 'baseline-values', 'analysis-config'].forEach(t => {
     const el = document.getElementById('results-tab-' + t);
     if (el) el.style.display = t === tab ? '' : 'none';
   });
@@ -451,6 +453,8 @@ function renderBalanceReviewContent() {
 
   const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
   const cBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const pLabel = cfg.scenarioTitle || pBl?.name || 'Base Scenario';
+  const cLabel = cfg.compareScenarioTitle || cBl?.name || 'Compare Scenario';
   const hasCompare = !!(run.cmpResults && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
   const detResults = run.detResults; // always monthly
   const taxRate = cfg.taxRate ?? 0;
@@ -613,11 +617,11 @@ function renderBalanceReviewContent() {
       <select style="min-width:220px;" onchange="onBrItemChange(this.value)">${dropdownOpts}</select>
     </div>
     <div class="chart-container" style="height:240px;margin-bottom:20px;"><canvas id="chart-br"></canvas></div>
-    ${hasCompare ? `<div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;">${esc(pBl?.name ?? 'Base Scenario')}</div>` : ''}
+    ${hasCompare ? `<div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;">${esc(pLabel)}</div>` : ''}
     ${buildTableHtml(baseRows)}
     ${cmpRows ? `
     <div style="margin-top:28px;">
-      <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;">${esc(cBl?.name ?? 'Compare Scenario')}</div>
+      <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;">${esc(cLabel)}</div>
       ${buildTableHtml(cmpRows)}
     </div>` : ''}`;
 }
@@ -638,6 +642,8 @@ function attachBalanceReviewChart() {
 
   const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
   const cBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const pLabel = cfg.scenarioTitle || pBl?.name || 'Base Scenario';
+  const cLabel = cfg.compareScenarioTitle || cBl?.name || 'Compare Scenario';
   const hasCompare = !!(run.cmpResults && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
 
   const detResults = run.detResults;
@@ -658,7 +664,7 @@ function attachBalanceReviewChart() {
   const labels  = detResults.map(r => monthLabel(r.month));
 
   const datasets = [{
-    label: hasCompare ? (pBl?.name ?? 'Base Scenario') : seriesLabel,
+    label: hasCompare ? pLabel : seriesLabel,
     data: getSeriesData(detResults),
     borderColor: color,
     borderWidth: 2.5,
@@ -669,7 +675,7 @@ function attachBalanceReviewChart() {
 
   if (hasCompare && run.cmpResults) {
     datasets.push({
-      label: cBl?.name ?? 'Compare Scenario',
+      label: cLabel,
       data: getSeriesData(run.cmpResults),
       borderColor: '#16a34a',
       borderWidth: 2.5,
@@ -714,6 +720,8 @@ function renderBaselineValuesContent() {
 
   const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
   const cBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const pLabel = cfg.scenarioTitle || pBl?.name || 'Base Scenario';
+  const cLabel = cfg.compareScenarioTitle || cBl?.name || 'Compare Scenario';
   const hasCompare = !!(run.cmpResults && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
 
   const buildTableCard = (baseline, results, selectId, tbodyId, headerAtId, title) => {
@@ -791,12 +799,156 @@ function renderBaselineValuesContent() {
     </div>`;
   };
 
-  const baseTitle = hasCompare ? (pBl?.name ?? 'Base Scenario') : 'Baseline Values Over Time';
-  const cmpTitle  = cBl?.name ?? 'Compare Scenario';
+  const baseTitle = hasCompare ? pLabel : 'Baseline Values Over Time';
+  const cmpTitle  = cLabel;
 
   return `
     ${buildTableCard(pBl, run.detResults, 'bv-month-select', 'bv-tbody', 'bv-at-header', baseTitle)}
     ${hasCompare && run.cmpResults ? buildTableCard(cBl ?? pBl, run.cmpResults, 'bv-cmp-month-select', 'bv-cmp-tbody', 'bv-cmp-at-header', cmpTitle) : ''}
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ANALYSIS CONFIG TAB
+// ═══════════════════════════════════════════════════════════════
+
+function renderAnalysisConfigContent() {
+  const cfg = state.lastRunConfig;
+  const run = state.lastRun;
+  if (!cfg || !run) return '<div class="empty-state-body">No results available.</div>';
+
+  const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
+  const cBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const pLabel = cfg.scenarioTitle || pBl?.name || 'Base Scenario';
+  const cLabel = cfg.compareScenarioTitle || cBl?.name || 'Compare Scenario';
+  const hasCompare = !!(run.cmpResults && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
+
+  // Resolve which events belong to each scenario
+  const primaryEventSets = (cfg.eventSetIds ?? []).map(sid => state.data.eventSets.find(s => s.id === sid)).filter(Boolean);
+  const compareEventSets = (cfg.compareEventSetIds ?? []).map(sid => state.data.eventSets.find(s => s.id === sid)).filter(Boolean);
+  const primaryEvents    = resolveEventSets(cfg.eventSetIds);
+  const compareEvents    = hasCompare ? resolveEventSets(cfg.compareEventSetIds) : [];
+  const overrideCount    = (cfg.eventOverrides ?? []).length;
+
+  const renderAssetRows = (bl) => (bl?.assets ?? []).map(a => `<tr>
+    <td>${esc(a.name)}</td>
+    <td class="text-muted">${esc(a.category)}</td>
+    <td class="text-right font-mono">${fmt$(a.value)}</td>
+    <td class="text-muted">${a.isInvestment
+      ? `Investment · ${a.annualMeanReturn}% mean / ${a.annualStdDev}% σ`
+      : `${a.monthlyGrowthRate > 0 ? a.monthlyGrowthRate + '%/mo growth' : 'No growth'}`}</td>
+    <td class="text-muted">${a.isLiquid ? 'Liquid' : 'Illiquid'}</td>
+  </tr>`).join('') || '<tr><td colspan="5" class="text-muted">No assets</td></tr>';
+
+  const renderLiabRows = (bl) => (bl?.liabilities ?? []).map(l => `<tr>
+    <td>${esc(l.name)}</td>
+    <td class="text-muted">${esc(l.category)}</td>
+    <td class="text-right font-mono">${fmt$(l.value)}</td>
+    <td class="text-muted">${l.annualInterestRate}% p.a.${l.termEndDate ? ` · renews ${monthLabel(l.termEndDate)}` : ''}</td>
+    <td class="text-muted">${l.useAmortization ? `Amortizing${l.amortizationEndDate ? ' to ' + monthLabel(l.amortizationEndDate) : ''}` : 'Fixed payment'}</td>
+  </tr>`).join('') || '<tr><td colspan="5" class="text-muted">No liabilities</td></tr>';
+
+  const renderEventRows = (events) => {
+    if (!events.length) return '<tr><td colspan="5" class="text-muted">No events</td></tr>';
+    return events.map(e => `<tr>
+      <td>${esc(e.name)}</td>
+      <td class="text-muted">${esc(e.category)}</td>
+      <td><span class="badge ${{ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time' }[e.type] ?? ''}">${
+        { income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out' }[e.type] ?? e.type
+      }</span></td>
+      <td class="text-right font-mono">${fmt$(e.amount)}</td>
+      <td class="text-muted">${e.isRecurring ? `${monthLabel(e.startDate)}${e.endDate ? ' – ' + monthLabel(e.endDate) : ' (ongoing)'}` : monthLabel(e.startDate)}</td>
+    </tr>`).join('');
+  };
+
+  const renderSetBadges = (sets, allEvents) => sets.length
+    ? sets.map(s => `<span class="badge">${esc(s.name)} <span class="label-note">(${(s.eventIds ?? []).length} events)</span></span>`).join(' ')
+    : `<span class="text-muted" style="font-size:12px;">All global events (${allEvents.length} total)</span>`;
+
+  const renderScenarioCard = (bl, label, scenarioTitle, eventSets, events, isCompare) => `
+    <div class="card mb-4">
+      <div class="section-header" style="margin-bottom:16px;">
+        <div>
+          <div class="section-title">${isCompare ? 'Compare Scenario' : 'Primary Scenario'}: ${esc(label)}</div>
+          ${scenarioTitle && bl && scenarioTitle !== bl.name ? `<div class="text-muted" style="font-size:12px;margin-top:2px;">Baseline: ${esc(bl.name)}</div>` : ''}
+        </div>
+        ${bl ? `<div class="text-muted" style="font-size:12px;">as of ${monthLabel(bl.date)}</div>` : ''}
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em;">Event Sets</div>
+        <div>${renderSetBadges(eventSets, events)}</div>
+      </div>
+
+      <div style="margin-bottom:20px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em;">Assets (${(bl?.assets ?? []).length})</div>
+        <div class="result-table-wrap">
+          <table>
+            <thead><tr>
+              <th>Name</th><th>Category</th><th class="text-right">Value</th><th>Growth</th><th>Liquidity</th>
+            </tr></thead>
+            <tbody>${renderAssetRows(bl)}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="margin-bottom:20px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em;">Liabilities (${(bl?.liabilities ?? []).length})</div>
+        <div class="result-table-wrap">
+          <table>
+            <thead><tr>
+              <th>Name</th><th>Category</th><th class="text-right">Balance</th><th>Rate</th><th>Type</th>
+            </tr></thead>
+            <tbody>${renderLiabRows(bl)}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em;">Events Included (${events.length})</div>
+        <div class="result-table-wrap">
+          <table>
+            <thead><tr>
+              <th>Name</th><th>Category</th><th>Type</th><th class="text-right">Amount</th><th>Period</th>
+            </tr></thead>
+            <tbody>${renderEventRows(events)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  return `
+    <div class="card mb-4">
+      <div class="section-header" style="margin-bottom:16px;">
+        <div class="section-title">Analysis Configuration</div>
+        <button class="btn btn-sm btn-ghost" onclick="navigate('analysis')">Edit Configuration</button>
+      </div>
+      <div class="stat-grid" style="margin-bottom:0;">
+        <div class="stat-card">
+          <div class="stat-label">Config Name</div>
+          <div class="stat-value" style="font-size:16px;">${esc(cfg.name)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Period</div>
+          <div class="stat-value" style="font-size:16px;">${monthLabel(cfg.startDate)} – ${monthLabel(cfg.endDate)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Inflation / Tax</div>
+          <div class="stat-value" style="font-size:16px;">${cfg.inflationRate}% / ${cfg.taxRate}%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Monte Carlo</div>
+          <div class="stat-value" style="font-size:16px;">${cfg.monteCarlo?.enabled ? `${cfg.monteCarlo.numSimulations} runs` : 'Off'}</div>
+        </div>
+        ${overrideCount > 0 ? `<div class="stat-card">
+          <div class="stat-label">Event Overrides</div>
+          <div class="stat-value" style="font-size:16px;">${overrideCount}</div>
+        </div>` : ''}
+      </div>
+    </div>
+
+    ${renderScenarioCard(pBl, pLabel, cfg.scenarioTitle, primaryEventSets, primaryEvents, false)}
+    ${hasCompare ? renderScenarioCard(cBl ?? pBl, cLabel, cfg.compareScenarioTitle, compareEventSets, compareEvents, true) : ''}
   `;
 }
 
@@ -820,6 +972,8 @@ function renderResults() {
   const vm   = cfg.viewMode ?? 'yearly';
   const pBl  = state.data.baselines.find(b => b.id === cfg.baselineId);
   const cBl  = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const pLabel = cfg.scenarioTitle || pBl?.name || 'Base Scenario';
+  const cLabel = cfg.compareScenarioTitle || cBl?.name || 'Compare Scenario';
 
   const det  = vm === 'yearly' ? aggregateYearly(run.detResults) : run.detResults;
   const cmp  = run.cmpResults ? (vm === 'yearly' ? aggregateYearly(run.cmpResults) : run.cmpResults) : null;
@@ -1108,7 +1262,7 @@ function renderResults() {
         <div class="page-title">Results: ${esc(cfg.name)}</div>
         <div class="page-subtitle">
           ${monthLabel(cfg.startDate)} – ${monthLabel(cfg.endDate)}
-          · ${pBl ? esc(pBl.name) : ''}${cBl ? ` vs ${esc(cBl.name)}` : ''}
+          · ${esc(pLabel)}${hasCompare ? ` vs ${esc(cLabel)}` : ''}
         </div>
       </div>
       <div class="flex gap-2 flex-wrap items-center">
@@ -1134,6 +1288,7 @@ function renderResults() {
       <button class="results-tab-btn${_resultsTab === 'events' ? ' active' : ''}" data-tab="events" onclick="switchResultsTab('events')">Event Details</button>
       <button class="results-tab-btn${_resultsTab === 'balance-review' ? ' active' : ''}" data-tab="balance-review" onclick="switchResultsTab('balance-review')">Balance Review</button>
       <button class="results-tab-btn${_resultsTab === 'baseline-values' ? ' active' : ''}" data-tab="baseline-values" onclick="switchResultsTab('baseline-values')">Baseline Values</button>
+      <button class="results-tab-btn${_resultsTab === 'analysis-config' ? ' active' : ''}" data-tab="analysis-config" onclick="switchResultsTab('analysis-config')">Analysis Config</button>
     </div>
 
     <!-- Tab 1: Overview -->
@@ -1200,8 +1355,8 @@ function renderResults() {
     ${hasCompare ? `<div class="flex items-center gap-2 mb-4">
       <span style="font-size:13px;color:var(--text-muted);">Tables showing:</span>
       <div class="toggle-group">
-        <button class="toggle-btn${!showCmpOverview ? ' active' : ''}" onclick="switchOverviewScenario('base')">${esc(pBl?.name ?? 'Base Scenario')}</button>
-        <button class="toggle-btn${showCmpOverview ? ' active' : ''}" onclick="switchOverviewScenario('compare')">${esc(cBl?.name ?? 'Compare Scenario')}</button>
+        <button class="toggle-btn${!showCmpOverview ? ' active' : ''}" onclick="switchOverviewScenario('base')">${esc(pLabel)}</button>
+        <button class="toggle-btn${showCmpOverview ? ' active' : ''}" onclick="switchOverviewScenario('compare')">${esc(cLabel)}</button>
       </div>
     </div>` : ''}
 
@@ -1298,6 +1453,11 @@ function renderResults() {
       </div>
     </div>
 
+    <!-- Tab 5: Analysis Config -->
+    <div id="results-tab-analysis-config"${_resultsTab !== 'analysis-config' ? ' style="display:none"' : ''}>
+      ${renderAnalysisConfigContent()}
+    </div>
+
   </div>`;
 }
 
@@ -1309,6 +1469,8 @@ function attachResultsCharts() {
   const vm  = cfg.viewMode ?? 'yearly';
   const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
   const cBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const pLabel = cfg.scenarioTitle || pBl?.name || 'Net Worth';
+  const cLabel = cfg.compareScenarioTitle || cBl?.name || 'Compare';
 
   const det = vm === 'yearly' ? aggregateYearly(run.detResults) : run.detResults;
   const cmp = run.cmpResults ? (vm === 'yearly' ? aggregateYearly(run.cmpResults) : run.cmpResults) : null;
@@ -1351,7 +1513,7 @@ function attachResultsCharts() {
     }
   } else {
     nwDatasets.push({
-      label: pBl?.name ?? 'Net Worth',
+      label: pLabel,
       data: det.map(r => r.netWorth),
       borderColor: '#2563eb', borderWidth: 2.5,
       backgroundColor: 'rgba(37,99,235,0.07)', fill: 'origin', tension: 0.3,
@@ -1360,7 +1522,7 @@ function attachResultsCharts() {
 
   if (cmp) {
     nwDatasets.push({
-      label: cBl?.name ?? 'Compare',
+      label: cLabel,
       data: cmp.map(r => r.netWorth),
       borderColor: '#16a34a', borderWidth: 2.5,
       backgroundColor: 'transparent', fill: false, tension: 0.3,

@@ -109,6 +109,10 @@ function openConfigModal(id = null) {
 
     <hr class="divider">
     <div style="font-weight:600;margin-bottom:12px;">Primary Scenario</div>
+    <div class="form-group">
+      <label>Scenario Title <span class="label-note">(optional label for this scenario)</span></label>
+      <input type="text" id="cfg-scenario-title" value="${esc(cfg.scenarioTitle ?? '')}" placeholder="e.g., Base Case">
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label>Baseline</label>
@@ -122,6 +126,10 @@ function openConfigModal(id = null) {
 
     <hr class="divider">
     <div style="font-weight:600;margin-bottom:12px;">Compare Scenario <span class="label-note" style="font-weight:400;">(optional)</span></div>
+    <div class="form-group">
+      <label>Compare Scenario Title <span class="label-note">(optional label for compare scenario)</span></label>
+      <input type="text" id="cfg-cmp-scenario-title" value="${esc(cfg.compareScenarioTitle ?? '')}" placeholder="e.g., Aggressive Savings">
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label>Compare Baseline <span class="label-note">(leave blank to use same baseline)</span></label>
@@ -192,6 +200,8 @@ function openConfigModal(id = null) {
     const updated = {
       id: existing?.id ?? uuid(),
       name, baselineId,
+      scenarioTitle: document.getElementById('cfg-scenario-title').value.trim(),
+      compareScenarioTitle: document.getElementById('cfg-cmp-scenario-title').value.trim(),
       compareBaselineId: document.getElementById('cfg-cbl').value || '',
       eventSetIds: [...document.querySelectorAll('input[name="cfg-es-primary"]:checked')].map(el => el.value),
       compareEventSetIds: [...document.querySelectorAll('input[name="cfg-es-compare"]:checked')].map(el => el.value),
