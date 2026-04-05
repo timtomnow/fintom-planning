@@ -550,3 +550,25 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color:
 
 /* ── Result row hover (expandable rows) ── */
 .result-row:hover td { background: var(--bg); }
+
+/* ── Results page tabs ── */
+.results-tabs {
+  display: flex;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 24px;
+  gap: 0;
+}
+.results-tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 20px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: -2px;
+  transition: color 0.1s, border-color 0.1s;
+}
+.results-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.results-tab-btn:hover:not(.active) { color: var(--text); }

@@ -155,6 +155,12 @@ Each configuration stores the settings for one forecast run:
 
 Toggle between **Monthly** and **Yearly** view. Use **Re-Run** to re-run the analysis with any override changes applied. Export the full table to **CSV**.
 
+The Results page is divided into three tabs:
+
+---
+
+#### Overview tab
+
 **Charts:**
 - **Net Worth Over Time** — single line (deterministic), or percentile bands (Monte Carlo). Compare baseline shown in green. Sustainability target shown in orange.
 - **Cumulative Cash Flow** — running sum of Income minus Expenses (transfers excluded) since the forecast start
@@ -195,13 +201,33 @@ After editing, a warning banner appears at the top of the page indicating the re
 
 Below the detail table, a second table shows every asset, liability, and the accumulated cash flow with four columns: **Start**, **At Month** (interactive), **Change**, and **End**. Use the dropdown to pick any month in the forecast period — the "At Month" column updates instantly to show what each account balance or loan balance looks like at that point. Assets created by "Deposit into Asset" events that don't exist in the baseline are shown as **Asset (new)** rows starting from $0.
 
-**All Analysis Events table:**
+---
 
-At the bottom of the Results page, a full list of all events used in the analysis is shown, including one row per monthly loan payment for each amortizing liability. It is paginated (25 rows per page) and can be filtered by event name (text search), category, and type.
+#### Event Details tab
+
+A full list of all events used in the analysis, including one row per monthly loan payment for each amortizing liability. It is paginated (25 rows per page) and can be filtered by event name (text search), category, and type.
 
 Columns: **Month** (when the event occurs), **Name**, **Category**, **Type**, **Amount**, **Cash Flow** (actual impact on the cash accumulator), and an **Edit** button. The Cash Flow column accounts for asset routing — events sent to or paid from an asset show `—` rather than a misleading cash impact.
 
 Click **Edit** on any row to open the override modal for that event, or to create a pre-filled override for a Loan Payment row. Click **Export CSV** to download the full list.
+
+---
+
+#### Balance Review tab
+
+Select any asset, liability, or **Accumulated Cash Flow** from the dropdown. The tab shows a chart of that item's balance over the forecast period plus a monthly breakdown table.
+
+Table columns vary by item type:
+
+| Item type | Breakdown columns |
+|---|---|
+| **Cash Flow** | + Inflows (net of tax, cash only) · − Outflows (cash only) · Net Change |
+| **Asset** | Growth / Loss (appreciation from growth rate or investment returns) · Events (deposits, withdrawals, linked transfers routed through this asset) · Net Change |
+| **Liability** | Interest (accrued this month) · Principal Paid (balance reduction) · Net Change |
+
+Every table includes **Starting Balance**, the breakdown columns, **Net Change**, and **Ending Balance**.
+
+The chart uses the monthly engine results directly — no recalculation is needed. Asset event impacts are derived from the All Analysis Events data for that month.
 
 ---
 

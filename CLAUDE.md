@@ -18,7 +18,7 @@ This is a self-contained, single-page financial planning app. No framework, no b
 | `js/pages/baselines.js` | renderBaselines, renderBaselineDetail, openBaselineModal, duplicateBaseline, deleteBaseline, openAssetModal, toggleInvestFields, deleteAsset, openLiabilityModal, toggleAmortFields, onPayModeChange, deleteLiability. |
 | `js/pages/events.js` | renderEvents, openEventModal, onEvTypeChange, onEvRecChange, deleteEvent, renderEventSets, renderEventSetDetail, openEventSetModal, openEventSetEventsModal, removeEventFromSet, deleteEventSet. |
 | `js/pages/analysis.js` | renderAnalysis, openConfigModal, toggleMCFields, deleteConfig, resolveEventSets, resolveEffectiveEvents, getEventsForPeriod, runAndView. |
-| `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, renderEventsTableSection, etc.), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt. |
+| `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, renderEventsTableSection, etc.), tab state (_resultsTab, _brSelectedItem, _brChart) + functions (switchResultsTab, renderBalanceReviewContent, attachBalanceReviewChart, onBrItemChange), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt. |
 | `js/pages/settings.js` | renderSettings, saveSettings, confirmClear. |
 | `README.md` | End-user instructions (Markdown). |
 
@@ -307,6 +307,19 @@ Simple line chart of the engine `cashFlow` accumulator over time, fill to origin
 
 ## Results Page Features
 
+### Tab Structure
+
+The Results page uses three tabs managed by module-level state:
+
+- `_resultsTab` — `'overview'` | `'events'` | `'balance-review'` (persists during the session; survives view-mode switches)
+- `switchResultsTab(tab)` — toggles `display` on `#results-tab-overview`, `#results-tab-events`, `#results-tab-balance-review` divs and updates `.results-tab-btn.active`; calls `_refreshBalanceReview()` when switching to the balance-review tab
+
+**Tab 1 — Overview:** summary stats, Net Worth chart, Cash Flow chart, Monthly/Annual Detail table, Baseline Values Over Time table.
+
+**Tab 2 — Event Details:** the `#ev-table-section` div containing `renderEventsTableSection()`. Moved from the Overview tab. `_refreshEvTable()` still works because `getElementById` finds the element even when the tab is hidden.
+
+**Tab 3 — Balance Review:** dropdown + balance chart (`chart-br`) + monthly breakdown table. See § Balance Review Tab below.
+
 ### Expandable Detail Rows
 
 Only **Monthly view** rows are expandable. Each monthly row has a chevron (▶/▼) and is clickable. Clicking calls `toggleEventDetail(key)` which shows/hides a hidden `<tr id="evd-{key}">` containing a sub-table of events active in that month. Annual/Yearly view rows are plain (no chevron, no onclick, no detail row rendered).
@@ -386,6 +399,34 @@ Payment = `(prevBalance − currBalance − extraPrincipal) + interest`. Extra p
 Filter dropdowns use `.ev-filter-dropdown` (absolute-positioned, `z-index:50`). `toggleEvFilterDD(id)` shows one and hides others. `_refreshEvTable()` re-renders just the `#ev-table-section` innerHTML without navigating.
 
 `typeLabel` and `badgeClass` in both `renderResults` and `renderEventsTableSection` map `'loan_payment'` → `'Loan Payment'` / `'neutral'` badge.
+
+### Balance Review Tab
+
+`renderBalanceReviewContent()` — builds the dropdown, breakdown table, and chart canvas for the Balance Review tab. Uses `_evTableData` (already populated by `renderResults`) to derive per-month event impacts without re-running the engine.
+
+**Dropdown options:**
+1. `''` → Accumulated Cash Flow (default)
+2. `'asset:<name>'` → each asset in the primary baseline
+3. `'asset:<name>'` → virtual assets (created by depositToAssetName events not in baseline)
+4. `'liab:<name>'` → each liability in the primary baseline
+
+`_brSelectedItem` stores the current dropdown value. `onBrItemChange(val)` updates it and calls `_refreshBalanceReview()`.
+
+**Breakdown columns by item type:**
+
+| Type | Columns |
+|---|---|
+| Cash Flow | Starting Balance · + Inflows (income after tax + inflows routed to cashFlow, not to assets) · − Outflows (expenses + loan payments that come from cashFlow) · Net Change · Ending Balance |
+| Asset | Starting Balance · Growth / Loss (net change minus events impact) · Events (deposits via depositToAssetName, withdrawals via payFromAssetName, transfers via linkedAssetName, loan payments via paymentAssetName) · Net Change · Ending Balance |
+| Liability | Starting Balance · Interest (prevBalance × effectiveRate / 12 / 100) · Principal Paid (startBal − endBal, clamped ≥ 0) · Net Change · Ending Balance |
+
+Starting/ending balances come directly from `assetSnapshots` / `liabSnapshots` / `r.cashFlow` on the monthly `detResults` — no recalculation needed.
+
+**Chart:** `chart-br` canvas. `attachBalanceReviewChart()` creates a Chart.js line chart (balance over time) and pushes the instance to both `_brChart` and `state.activeCharts`. The chart is destroyed and recreated whenever the dropdown changes or the tab is re-shown.
+
+`_brChart = null` is reset at the top of `renderResults` (after `destroyCharts()` has already destroyed it) to prevent a double-destroy on the next render.
+
+`attachResultsCharts()` calls `attachBalanceReviewChart()` at the end when `_resultsTab === 'balance-review'`.
 
 ---
 

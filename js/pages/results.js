@@ -196,6 +196,11 @@ let _evTableData = []; // populated by renderResults
 
 const EV_PAGE_SIZE = 25;
 
+// Results page tab state
+let _resultsTab = 'overview'; // 'overview' | 'events' | 'balance-review'
+let _brSelectedItem = '';     // '' = accumulated cash flow; 'asset:Name' or 'liab:Name'
+let _brChart = null;          // Chart.js instance for balance review chart (managed separately)
+
 function renderEventsTableSection() {
   const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out', loan_payment: 'Loan Payment' }[t] ?? t);
   const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time', loan_payment: 'neutral' }[t] ?? '');
@@ -363,10 +368,286 @@ function exportEventsCSV() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// RESULTS TAB SWITCHING
+// ═══════════════════════════════════════════════════════════════
+
+function switchResultsTab(tab) {
+  _resultsTab = tab;
+  ['overview', 'events', 'balance-review'].forEach(t => {
+    const el = document.getElementById('results-tab-' + t);
+    if (el) el.style.display = t === tab ? '' : 'none';
+  });
+  document.querySelectorAll('.results-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  if (tab === 'balance-review') _refreshBalanceReview();
+}
+
+function _refreshBalanceReview() {
+  const wrap = document.getElementById('balance-review-section');
+  if (!wrap) return;
+  wrap.innerHTML = renderBalanceReviewContent();
+  if (_brChart) {
+    const idx = state.activeCharts.indexOf(_brChart);
+    if (idx >= 0) state.activeCharts.splice(idx, 1);
+    _brChart.destroy();
+    _brChart = null;
+  }
+  requestAnimationFrame(attachBalanceReviewChart);
+}
+
+function onBrItemChange(val) {
+  _brSelectedItem = val;
+  _refreshBalanceReview();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BALANCE REVIEW TAB
+// ═══════════════════════════════════════════════════════════════
+
+function renderBalanceReviewContent() {
+  const cfg = state.lastRunConfig;
+  const run = state.lastRun;
+  if (!cfg || !run) return '<div class="empty-state-body">No results available.</div>';
+
+  const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
+  const detResults = run.detResults; // always monthly
+  const taxRate = cfg.taxRate ?? 0;
+
+  // Build item list for dropdown
+  const baseAssetNames = new Set((pBl?.assets ?? []).map(a => a.name));
+  const firstResult = detResults[0];
+  const virtualAssets = (firstResult?.assetSnapshots ?? []).filter(s => !baseAssetNames.has(s.name));
+
+  const items = [
+    { key: '', label: 'Accumulated Cash Flow', type: 'cash' },
+    ...(pBl?.assets ?? []).map(a => ({ key: `asset:${a.name}`, label: a.name, type: 'asset' })),
+    ...virtualAssets.map(s => ({ key: `asset:${s.name}`, label: `${s.name} (new)`, type: 'asset' })),
+    ...(pBl?.liabilities ?? []).map(l => ({ key: `liab:${l.name}`, label: l.name, type: 'liability' })),
+  ];
+
+  // Ensure selected key is still valid (e.g. after re-run with different baseline)
+  if (_brSelectedItem && !items.find(i => i.key === _brSelectedItem)) _brSelectedItem = '';
+  const selectedKey = _brSelectedItem;
+  const selectedItem = items.find(i => i.key === selectedKey) ?? items[0];
+  const itemType = selectedItem.type;
+  const itemName = selectedKey.includes(':') ? selectedKey.split(':').slice(1).join(':') : '';
+
+  // ── Compute rows ──
+  const rows = detResults.map((r, i) => {
+    const prev = i > 0 ? detResults[i - 1] : null;
+
+    if (itemType === 'cash') {
+      const startBal = prev?.cashFlow ?? 0;
+      const endBal = r.cashFlow;
+      // Compute inflows and outflows that route through cashFlow this month
+      const monthEvts = _evTableData.filter(e => e.startDate === r.month);
+      let inflow = 0, outflow = 0;
+      for (const e of monthEvts) {
+        if ((e.type === 'income' || e.type === 'one_time_inflow') && !e.depositToAssetName) {
+          inflow += e.type === 'income' ? e.amount * (1 - taxRate / 100) : e.amount;
+        }
+        if ((e.type === 'expense' || e.type === 'one_time_outflow')
+            && !e.payFromAssetName && !e.linkedAssetName && !e.linkedLiabilityName) {
+          outflow += e.amount;
+        }
+        if (e.type === 'loan_payment') {
+          const liab = pBl?.liabilities?.find(l => l.id === e._liabId);
+          if (!liab?.paymentAssetName) outflow += e.amount;
+        }
+      }
+      return { month: r.month, startBal, inflow, outflow, change: endBal - startBal, endBal };
+
+    } else if (itemType === 'asset') {
+      const startBal = prev
+        ? (prev.assetSnapshots?.find(s => s.name === itemName)?.value ?? 0)
+        : (pBl?.assets?.find(a => a.name === itemName)?.value ?? 0);
+      const endBal = r.assetSnapshots?.find(s => s.name === itemName)?.value ?? 0;
+      // Events that directly affect this asset's value
+      const monthEvts = _evTableData.filter(e => e.startDate === r.month);
+      let eventsImpact = 0;
+      for (const e of monthEvts) {
+        if ((e.type === 'income' || e.type === 'one_time_inflow') && e.depositToAssetName === itemName) {
+          eventsImpact += e.type === 'income' ? e.amount * (1 - taxRate / 100) : e.amount;
+        }
+        if ((e.type === 'expense' || e.type === 'one_time_outflow') && e.payFromAssetName === itemName) {
+          eventsImpact -= e.amount;
+        }
+        if ((e.type === 'expense' || e.type === 'one_time_outflow') && e.linkedAssetName === itemName) {
+          eventsImpact += e.amount;
+        }
+        if (e.type === 'loan_payment') {
+          const liab = pBl?.liabilities?.find(l => l.id === e._liabId);
+          if (liab?.paymentAssetName === itemName) eventsImpact -= e.amount;
+        }
+      }
+      const growthLoss = (endBal - startBal) - eventsImpact;
+      return { month: r.month, startBal, growthLoss, eventsImpact, change: endBal - startBal, endBal };
+
+    } else {
+      // liability
+      const liab = pBl?.liabilities?.find(l => l.name === itemName);
+      const startBal = prev
+        ? (prev.liabSnapshots?.find(s => s.name === itemName)?.value ?? 0)
+        : (liab?.value ?? 0);
+      const endBal = r.liabSnapshots?.find(s => s.name === itemName)?.value ?? 0;
+      const effectiveRate = (liab?.termEndDate && r.month > liab.termEndDate && (liab?.renewalRate ?? 0) > 0)
+        ? (liab.renewalRate ?? 0) : (liab?.annualInterestRate ?? 0);
+      const interest = startBal > 0 ? startBal * effectiveRate / 12 / 100 : 0;
+      const principalPaid = Math.max(0, startBal - endBal);
+      return { month: r.month, startBal, interest, principalPaid, change: endBal - startBal, endBal };
+    }
+  });
+
+  // ── Build table columns based on item type ──
+  let thead, dataRows;
+  if (itemType === 'cash') {
+    thead = `<tr>
+      <th>Month</th>
+      <th class="text-right">Starting Balance</th>
+      <th class="text-right">+ Inflows</th>
+      <th class="text-right">− Outflows</th>
+      <th class="text-right">Net Change</th>
+      <th class="text-right">Ending Balance</th>
+    </tr>`;
+    dataRows = rows.map(row => `<tr>
+      <td class="nowrap" style="font-size:12px;">${monthLabel(row.month)}</td>
+      <td class="text-right font-mono">${fmt$(row.startBal)}</td>
+      <td class="text-right font-mono text-positive">${row.inflow > 0 ? fmt$(row.inflow) : '—'}</td>
+      <td class="text-right font-mono text-negative">${row.outflow > 0 ? fmt$(row.outflow) : '—'}</td>
+      <td class="text-right font-mono ${row.change >= 0 ? 'text-positive' : 'text-negative'}">${row.change >= 0 ? '+' : ''}${fmt$(row.change)}</td>
+      <td class="text-right font-mono ${row.endBal >= 0 ? '' : 'text-negative'}">${fmt$(row.endBal)}</td>
+    </tr>`).join('');
+
+  } else if (itemType === 'asset') {
+    thead = `<tr>
+      <th>Month</th>
+      <th class="text-right">Starting Balance</th>
+      <th class="text-right">Growth / Loss</th>
+      <th class="text-right">Events</th>
+      <th class="text-right">Net Change</th>
+      <th class="text-right">Ending Balance</th>
+    </tr>`;
+    dataRows = rows.map(row => `<tr>
+      <td class="nowrap" style="font-size:12px;">${monthLabel(row.month)}</td>
+      <td class="text-right font-mono">${fmt$(row.startBal)}</td>
+      <td class="text-right font-mono ${row.growthLoss >= 0 ? 'text-positive' : 'text-negative'}">${row.growthLoss !== 0 ? (row.growthLoss >= 0 ? '+' : '') + fmt$(row.growthLoss) : '—'}</td>
+      <td class="text-right font-mono ${row.eventsImpact >= 0 ? 'text-positive' : 'text-negative'}">${row.eventsImpact !== 0 ? (row.eventsImpact >= 0 ? '+' : '') + fmt$(row.eventsImpact) : '—'}</td>
+      <td class="text-right font-mono ${row.change >= 0 ? 'text-positive' : 'text-negative'}">${row.change >= 0 ? '+' : ''}${fmt$(row.change)}</td>
+      <td class="text-right font-mono">${fmt$(row.endBal)}</td>
+    </tr>`).join('');
+
+  } else {
+    thead = `<tr>
+      <th>Month</th>
+      <th class="text-right">Starting Balance</th>
+      <th class="text-right">Interest</th>
+      <th class="text-right">Principal Paid</th>
+      <th class="text-right">Net Change</th>
+      <th class="text-right">Ending Balance</th>
+    </tr>`;
+    dataRows = rows.map(row => `<tr>
+      <td class="nowrap" style="font-size:12px;">${monthLabel(row.month)}</td>
+      <td class="text-right font-mono">${fmt$(row.startBal)}</td>
+      <td class="text-right font-mono text-negative">${row.interest > 0 ? fmt$(row.interest) : '—'}</td>
+      <td class="text-right font-mono text-positive">${row.principalPaid > 0 ? fmt$(row.principalPaid) : '—'}</td>
+      <td class="text-right font-mono ${row.change <= 0 ? 'text-positive' : 'text-negative'}">${row.change !== 0 ? (row.change >= 0 ? '+' : '') + fmt$(row.change) : '—'}</td>
+      <td class="text-right font-mono">${fmt$(row.endBal)}</td>
+    </tr>`).join('');
+  }
+
+  const dropdownOpts = items.map(item =>
+    `<option value="${esc(item.key)}"${item.key === selectedKey ? ' selected' : ''}>${esc(item.label)}</option>`
+  ).join('');
+
+  return `
+    <div class="section-header" style="margin-bottom:16px;">
+      <div class="section-title">Balance Review</div>
+      <select style="min-width:220px;" onchange="onBrItemChange(this.value)">${dropdownOpts}</select>
+    </div>
+    <div class="chart-container" style="height:240px;margin-bottom:20px;"><canvas id="chart-br"></canvas></div>
+    <div class="result-table-wrap">
+      <table>
+        <thead>${thead}</thead>
+        <tbody>${dataRows}</tbody>
+      </table>
+    </div>`;
+}
+
+function attachBalanceReviewChart() {
+  const canvas = document.getElementById('chart-br');
+  if (!canvas) return;
+  if (_brChart) {
+    const idx = state.activeCharts.indexOf(_brChart);
+    if (idx >= 0) state.activeCharts.splice(idx, 1);
+    _brChart.destroy();
+    _brChart = null;
+  }
+
+  const cfg = state.lastRunConfig;
+  const run = state.lastRun;
+  if (!cfg || !run) return;
+
+  const detResults = run.detResults;
+  const selectedKey = _brSelectedItem;
+  const itemName = selectedKey.includes(':') ? selectedKey.split(':').slice(1).join(':') : '';
+  const isLiab = selectedKey.startsWith('liab:');
+  const isAsset = selectedKey.startsWith('asset:');
+
+  const labels = detResults.map(r => monthLabel(r.month));
+  let data, seriesLabel;
+  if (!selectedKey) {
+    data = detResults.map(r => r.cashFlow);
+    seriesLabel = 'Accumulated Cash Flow';
+  } else if (isAsset) {
+    data = detResults.map(r => r.assetSnapshots?.find(s => s.name === itemName)?.value ?? 0);
+    seriesLabel = itemName;
+  } else {
+    data = detResults.map(r => r.liabSnapshots?.find(s => s.name === itemName)?.value ?? 0);
+    seriesLabel = itemName;
+  }
+
+  const color = isLiab ? '#dc2626' : '#2563eb';
+  const bgColor = isLiab ? 'rgba(220,38,38,0.07)' : 'rgba(37,99,235,0.07)';
+
+  _brChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: seriesLabel,
+        data,
+        borderColor: color,
+        borderWidth: 2.5,
+        backgroundColor: bgColor,
+        fill: 'origin',
+        tension: 0.3,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt$(ctx.raw)}` } },
+      },
+      elements: { point: { radius: 0, hoverRadius: 4 } },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 14, font: { size: 11 } } },
+        y: { grid: { color: '#f0f0f0' }, ticks: { font: { size: 11 }, callback: v => fmtCompact(v) } },
+      },
+    },
+  });
+  state.activeCharts.push(_brChart);
+}
+
+// ═══════════════════════════════════════════════════════════════
 // RESULTS PAGE
 // ═══════════════════════════════════════════════════════════════
 
 function renderResults() {
+  _brChart = null; // already destroyed by destroyCharts() during navigate — clear stale reference
   const cfg = state.lastRunConfig;
   const run = state.lastRun;
 
@@ -596,6 +877,16 @@ function renderResults() {
       <a href="#" onclick="reRunAnalysis();return false;" style="margin-left:8px;font-weight:600;">Re-run now →</a>
     </div>
 
+    <!-- Tab bar -->
+    <div class="results-tabs">
+      <button class="results-tab-btn${_resultsTab === 'overview' ? ' active' : ''}" data-tab="overview" onclick="switchResultsTab('overview')">Overview</button>
+      <button class="results-tab-btn${_resultsTab === 'events' ? ' active' : ''}" data-tab="events" onclick="switchResultsTab('events')">Event Details</button>
+      <button class="results-tab-btn${_resultsTab === 'balance-review' ? ' active' : ''}" data-tab="balance-review" onclick="switchResultsTab('balance-review')">Balance Review</button>
+    </div>
+
+    <!-- Tab 1: Overview -->
+    <div id="results-tab-overview"${_resultsTab !== 'overview' ? ' style="display:none"' : ''}>
+
     <!-- Summary stats -->
     <div class="stat-grid" style="margin-bottom:20px;">
       <div class="stat-card">
@@ -794,9 +1085,22 @@ function renderResults() {
       </div>`;
     })()}
 
-    <!-- All Analysis Events table -->
-    <div class="card" style="margin-top:20px;" id="ev-table-section">
-      ${renderEventsTableSection()}
+    </div> <!-- end results-tab-overview -->
+
+    <!-- Tab 2: Event Details -->
+    <div id="results-tab-events"${_resultsTab !== 'events' ? ' style="display:none"' : ''}>
+      <div class="card" id="ev-table-section">
+        ${renderEventsTableSection()}
+      </div>
+    </div>
+
+    <!-- Tab 3: Balance Review -->
+    <div id="results-tab-balance-review"${_resultsTab !== 'balance-review' ? ' style="display:none"' : ''}>
+      <div class="card">
+        <div id="balance-review-section">
+          ${_resultsTab === 'balance-review' ? renderBalanceReviewContent() : ''}
+        </div>
+      </div>
     </div>
 
   </div>`;
@@ -914,6 +1218,9 @@ function attachResultsCharts() {
       scales: { x: xAxis, y: yAxis },
     },
   });
+
+  // ── Balance Review Chart (only if that tab is active) ──
+  if (_resultsTab === 'balance-review') attachBalanceReviewChart();
 }
 
 function setViewMode(vm) {
