@@ -202,6 +202,9 @@ const EV_PAGE_SIZE = 25;
 let _resultsTab = 'overview'; // 'overview' | 'events' | 'balance-review' | 'baseline-values'
 let _brSelectedItem = '';     // '' = accumulated cash flow; 'asset:Name' or 'liab:Name'
 let _brChart = null;          // Chart.js instance for balance review chart (managed separately)
+let _brChart2 = null;         // Chart.js instance for cumulative interest/growth chart
+let _brBaseRows = null;       // computed rows for base scenario (set by renderBalanceReviewContent)
+let _brCmpRows = null;        // computed rows for compare scenario (set by renderBalanceReviewContent)
 let _overviewScenario = 'base'; // 'base' | 'compare'; which scenario's tables to show in overview
 let _evTableScenario  = 'base'; // 'base' | 'compare'; which scenario to show in event details
 let _cmpEvTableData   = [];     // compare-scenario expanded events; populated by renderResults
@@ -434,7 +437,13 @@ function _refreshBalanceReview() {
     _brChart.destroy();
     _brChart = null;
   }
-  requestAnimationFrame(attachBalanceReviewChart);
+  if (_brChart2) {
+    const idx = state.activeCharts.indexOf(_brChart2);
+    if (idx >= 0) state.activeCharts.splice(idx, 1);
+    _brChart2.destroy();
+    _brChart2 = null;
+  }
+  requestAnimationFrame(() => { attachBalanceReviewChart(); attachBalanceReviewChart2(); });
 }
 
 function onBrItemChange(val) {
@@ -607,9 +616,15 @@ function renderBalanceReviewContent() {
   const baseRows = buildRows(detResults, pBl, _evTableData);
   const cmpRows  = hasCompare ? buildRows(run.cmpResults, cBl ?? pBl, _cmpEvTableData) : null;
 
+  // Store rows for use by attachBalanceReviewChart2
+  _brBaseRows = baseRows;
+  _brCmpRows = cmpRows;
+
   const dropdownOpts = items.map(item =>
     `<option value="${esc(item.key)}"${item.key === selectedKey ? ' selected' : ''}>${esc(item.label)}</option>`
   ).join('');
+
+  const chart2Title = itemType === 'liability' ? 'Total Interest Paid' : 'Total Growth / Loss';
 
   return `
     <div class="section-header" style="margin-bottom:16px;">
@@ -617,6 +632,9 @@ function renderBalanceReviewContent() {
       <select style="min-width:220px;" onchange="onBrItemChange(this.value)">${dropdownOpts}</select>
     </div>
     <div class="chart-container" style="height:240px;margin-bottom:20px;"><canvas id="chart-br"></canvas></div>
+    ${itemType !== 'cash' ? `
+    <div style="margin-bottom:8px;font-size:13px;font-weight:600;color:var(--text-muted);">${esc(chart2Title)}</div>
+    <div class="chart-container" style="height:200px;margin-bottom:20px;"><canvas id="chart-br-2"></canvas></div>` : ''}
     ${hasCompare ? `<div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;">${esc(pLabel)}</div>` : ''}
     ${buildTableHtml(baseRows)}
     ${cmpRows ? `
@@ -707,6 +725,89 @@ function attachBalanceReviewChart() {
     },
   });
   state.activeCharts.push(_brChart);
+}
+
+function attachBalanceReviewChart2() {
+  const canvas = document.getElementById('chart-br-2');
+  if (!canvas) return;
+  if (_brChart2) {
+    const idx = state.activeCharts.indexOf(_brChart2);
+    if (idx >= 0) state.activeCharts.splice(idx, 1);
+    _brChart2.destroy();
+    _brChart2 = null;
+  }
+  if (!_brBaseRows || !_brBaseRows.length) return;
+
+  const cfg = state.lastRunConfig;
+  const run = state.lastRun;
+  if (!cfg || !run) return;
+
+  const isLiab = _brSelectedItem.startsWith('liab:');
+  const isAsset = _brSelectedItem.startsWith('asset:');
+  if (!isLiab && !isAsset) return;
+
+  const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
+  const cBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const pLabel = cfg.scenarioTitle || pBl?.name || 'Base Scenario';
+  const cLabel = cfg.compareScenarioTitle || cBl?.name || 'Compare Scenario';
+  const hasCompare = !!_brCmpRows;
+
+  const field = isLiab ? 'interest' : 'growthLoss';
+  const chartTitle = isLiab ? 'Total Interest Paid' : 'Total Growth / Loss';
+
+  const cumSum = (rows) => {
+    let acc = 0;
+    return rows.map(row => { acc += (row[field] ?? 0); return acc; });
+  };
+
+  const labels = _brBaseRows.map(r => monthLabel(r.month));
+  const color   = isLiab ? '#dc2626' : '#2563eb';
+  const bgColor = isLiab ? 'rgba(220,38,38,0.07)' : 'rgba(37,99,235,0.07)';
+
+  const datasets = [{
+    label: hasCompare ? pLabel : chartTitle,
+    data: cumSum(_brBaseRows),
+    borderColor: color,
+    borderWidth: 2.5,
+    backgroundColor: hasCompare ? 'transparent' : bgColor,
+    fill: hasCompare ? false : 'origin',
+    tension: 0.3,
+  }];
+
+  if (hasCompare && _brCmpRows) {
+    datasets.push({
+      label: cLabel,
+      data: cumSum(_brCmpRows),
+      borderColor: '#16a34a',
+      borderWidth: 2.5,
+      backgroundColor: 'transparent',
+      fill: false,
+      tension: 0.3,
+    });
+  }
+
+  _brChart2 = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: hasCompare,
+          labels: { boxWidth: 12, padding: 14, font: { size: 12 } },
+        },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt$(ctx.raw)}` } },
+      },
+      elements: { point: { radius: 0, hoverRadius: 4 } },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 14, font: { size: 11 } } },
+        y: { grid: { color: '#f0f0f0' }, ticks: { font: { size: 11 }, callback: v => fmtCompact(v) } },
+      },
+    },
+  });
+  state.activeCharts.push(_brChart2);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -957,7 +1058,10 @@ function renderAnalysisConfigContent() {
 // ═══════════════════════════════════════════════════════════════
 
 function renderResults() {
-  _brChart = null; // already destroyed by destroyCharts() during navigate — clear stale reference
+  _brChart = null;  // already destroyed by destroyCharts() during navigate — clear stale reference
+  _brChart2 = null; // same
+  _brBaseRows = null;
+  _brCmpRows = null;
   const cfg = state.lastRunConfig;
   const run = state.lastRun;
 
@@ -1654,8 +1758,8 @@ function attachResultsCharts() {
     },
   });
 
-  // ── Balance Review Chart (only if that tab is active) ──
-  if (_resultsTab === 'balance-review') attachBalanceReviewChart();
+  // ── Balance Review Charts (only if that tab is active) ──
+  if (_resultsTab === 'balance-review') { attachBalanceReviewChart(); attachBalanceReviewChart2(); }
 }
 
 function setViewMode(vm) {

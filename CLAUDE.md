@@ -325,7 +325,7 @@ The Results page uses five tabs managed by module-level state:
 
 **Tab 2 — Event Details:** the `#ev-table-section` div containing `renderEventsTableSection()`. When compare exists, a scenario toggle is rendered inside the section (so it is refreshed by `_refreshEvTable()`). Compare events are read-only — no Edit buttons. `exportEventsCSV()` exports the currently-selected scenario's data.
 
-**Tab 3 — Balance Review:** dropdown + balance chart (`chart-br`) + breakdown table(s). When compare exists: the chart shows both scenarios as separate lines; two breakdown tables are stacked with scenario headings. See § Balance Review Tab below.
+**Tab 3 — Balance Review:** dropdown + balance chart (`chart-br`) + optional cumulative chart (`chart-br-2`) + breakdown table(s). When compare exists: each chart shows both scenarios as separate lines; two breakdown tables are stacked with scenario headings. See § Balance Review Tab below.
 
 **Tab 4 — Baseline Values:** rendered by `renderBaselineValuesContent()` into `#baseline-values-section`. Shows per-account balances over the forecast horizon with an "At month:" dropdown to inspect values at any point in time. When no compare scenario: one card with section title "Baseline Values Over Time" using `run.detResults` + primary baseline. When compare exists: two stacked cards — base scenario first (titled with the baseline name or scenario title), compare scenario second — each with its own independent "At month:" dropdown (`#bv-month-select` / `#bv-cmp-month-select`) and tbody (`#bv-tbody` / `#bv-cmp-tbody`). `updateBaselineValuesAt()` drives the base table; `updateBaselineCmpValuesAt()` drives the compare table. Columns: Name · Type · Start · At [month] · Change (total) · End.
 
@@ -431,7 +431,7 @@ Filter dropdowns use `.ev-filter-dropdown` (absolute-positioned, `z-index:50`). 
 
 ### Balance Review Tab
 
-`renderBalanceReviewContent()` — builds the dropdown, breakdown table(s), and chart canvas for the Balance Review tab. Uses `_evTableData` and (when compare exists) `_cmpEvTableData` to derive per-month event impacts without re-running the engine.
+`renderBalanceReviewContent()` — builds the dropdown, breakdown table(s), and chart canvases for the Balance Review tab. Uses `_evTableData` and (when compare exists) `_cmpEvTableData` to derive per-month event impacts without re-running the engine.
 
 **Dropdown options** (built from primary baseline; shared between both scenarios when compare exists):
 1. `''` → Accumulated Cash Flow (default)
@@ -444,7 +444,7 @@ Filter dropdowns use `.ev-filter-dropdown` (absolute-positioned, `z-index:50`). 
 **When compare scenario exists:**
 - The breakdown logic is extracted into `buildRows(results, blObj, evData)` and `buildTableHtml(rows)` local functions so it can be called for both scenarios.
 - Two tables are rendered stacked: base scenario first (with the primary baseline name as heading), then compare scenario.
-- The chart (`chart-br`) plots both scenarios as separate lines — base in blue, compare in green — with a legend shown.
+- Both charts (`chart-br` and `chart-br-2`) plot both scenarios as separate lines — base in blue, compare in green — with a legend shown.
 
 **Breakdown columns by item type:**
 
@@ -456,11 +456,13 @@ Filter dropdowns use `.ev-filter-dropdown` (absolute-positioned, `z-index:50`). 
 
 Starting/ending balances come directly from `assetSnapshots` / `liabSnapshots` / `r.cashFlow` on the monthly results — no recalculation needed.
 
-**Chart:** `chart-br` canvas. `attachBalanceReviewChart()` creates a Chart.js line chart and pushes the instance to both `_brChart` and `state.activeCharts`. When compare exists it adds a second dataset (green, no fill). Legend is shown only when compare exists. The chart is destroyed and recreated whenever the dropdown changes or the tab is re-shown.
+**Chart 1 (`chart-br`):** `attachBalanceReviewChart()` creates a Chart.js line chart showing the selected item's balance over time. Pushed to `_brChart` and `state.activeCharts`. When compare exists it adds a second dataset (green, no fill). Legend is shown only when compare exists.
 
-`_brChart = null` is reset at the top of `renderResults` (after `destroyCharts()` has already destroyed it) to prevent a double-destroy on the next render.
+**Chart 2 (`chart-br-2`):** `attachBalanceReviewChart2()` creates a cumulative chart shown only for assets and liabilities (not for Cash Flow). For liabilities it plots cumulative total interest paid; for assets it plots cumulative total growth/loss. Uses module-level `_brBaseRows` / `_brCmpRows` (computed by `buildRows` inside `renderBalanceReviewContent` and stored before returning) so it doesn't need to recompute event impacts. Same color scheme as chart 1 (blue/green for compare). Pushed to `_brChart2` and `state.activeCharts`.
 
-`attachResultsCharts()` calls `attachBalanceReviewChart()` at the end when `_resultsTab === 'balance-review'`.
+`_brChart = null`, `_brChart2 = null`, `_brBaseRows = null`, `_brCmpRows = null` are reset at the top of `renderResults` (after `destroyCharts()` has already destroyed them) to prevent double-destroy on the next render.
+
+`attachResultsCharts()` calls both `attachBalanceReviewChart()` and `attachBalanceReviewChart2()` when `_resultsTab === 'balance-review'`.
 
 ---
 

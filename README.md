@@ -223,9 +223,13 @@ Click **Edit** on any row to open the override modal for that event, or to creat
 
 #### Balance Review tab
 
-Select any asset, liability, or **Accumulated Cash Flow** from the dropdown. The tab shows a chart of that item's balance over the forecast period plus a monthly breakdown table.
+Select any asset, liability, or **Accumulated Cash Flow** from the dropdown. The tab shows:
 
-**Compare scenario:** When the analysis has a Compare Scenario, the chart plots both the base and compare lines simultaneously (base in blue, compare in green). Two breakdown tables are shown stacked — one for each scenario with a heading above each — using the same dropdown selection.
+1. A **balance chart** of that item's value over the forecast period.
+2. For assets and liabilities only, a second **cumulative chart** — *Total Growth / Loss* for assets, *Total Interest Paid* for liabilities — showing the running total accumulated over time.
+3. A monthly **breakdown table** with the per-period detail.
+
+**Compare scenario:** When the analysis has a Compare Scenario, both charts plot the base and compare lines simultaneously (base in blue, compare in green). Two breakdown tables are shown stacked — one for each scenario with a heading above each — using the same dropdown selection.
 
 Table columns vary by item type:
 
