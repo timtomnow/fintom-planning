@@ -177,14 +177,15 @@ Toggle between **Monthly** and **Yearly** view. Use **Re-Run** to re-run the ana
 
 > **Note on Δ NW vs Cash Flow:** Cash Flow ≠ Δ NW. The difference is asset appreciation (investment growth, property appreciation) which increases net worth without appearing in the cash flow columns.
 
-**Expandable period rows:**
+**Expandable period rows (Monthly view only):**
 
-Every row in the detail table is clickable. Click any row to expand it and see which events and loan payments were active in that period, along with their amounts and cash-flow impact (+income, −expense, 0 for transfers). Amortizing liabilities appear as **Loan Payment** rows (shown in grey) with their computed payment for the period. Extra principal payment events appear as separate rows and are not merged into the Loan Payment row.
+In **Monthly view**, each row has a chevron and is clickable. Click a row to expand it and see which events and loan payments were active in that month, along with their amounts and cash-flow impact (+income, −expense, 0 for transfers). Amortizing liabilities appear as **Loan Payment** rows (shown in grey) with their computed payment for the month. Extra principal payment events appear as separate rows and are not merged into the Loan Payment row.
 
 - You can **Edit** any event row — edits are saved to this analysis only and do not affect the global Events page.
-- In **Monthly view**, clicking Edit on a Loan Payment row opens a pre-filled "Edit Analysis Event" form for that specific payment, letting you add overrides for the period.
-- In **Yearly view**, clicking Edit on a Loan Payment row opens a blank "Add Analysis Event" form for that year's start month (since the yearly total spans multiple individual payments).
-- You can also **+ Add Event** to any period.
+- Clicking Edit on a Loan Payment row opens a pre-filled "Edit Analysis Event" form for that specific payment.
+- You can also **+ Add Event** to any month.
+
+Annual view rows are not expandable; switch to Monthly view to inspect or edit individual period events.
 
 The **Cash Flow** column in the expanded sub-table reflects the actual impact on the cash accumulator: events routed through assets (via "Deposit into Asset" or "Pay from Asset") show `—` since they do not affect the cash pool directly.
 

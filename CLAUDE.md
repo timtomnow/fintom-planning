@@ -309,18 +309,15 @@ Simple line chart of the engine `cashFlow` accumulator over time, fill to origin
 
 ### Expandable Detail Rows
 
-Each row in the Annual/Monthly Detail table has a chevron (▶/▼) and is clickable. Clicking calls `toggleEventDetail(key)` which shows/hides a hidden `<tr id="evd-{key}">` containing a sub-table of events active in that period.
+Only **Monthly view** rows are expandable. Each monthly row has a chevron (▶/▼) and is clickable. Clicking calls `toggleEventDetail(key)` which shows/hides a hidden `<tr id="evd-{key}">` containing a sub-table of events active in that month. Annual/Yearly view rows are plain (no chevron, no onclick, no detail row rendered).
 
-- **Monthly view**: shows events where `isEventActive(ev, month)` is true
-- **Yearly view**: aggregates events across all months in the year within the analysis range; sums amounts and cash flow per event ID
 - Each event row has an **Edit** button → `openOverrideEventModal(cfgId, ev.id, month)`
 - An **+ Add Event to this period** button → `openOverrideEventModal(cfgId, null, month)`
 
 In addition to user-defined events, `renderPeriodEvents(periodKey)` also renders **loan payment rows** (`liabEntries`) for each amortizing liability in the primary baseline. These are derived from `run.detResults` liabSnapshots:
 - `payment = (prevBalance − currBalance − extraPrincipal) + interest` — extra principal payments (events with `linkedLiabilityName === l.name`) are subtracted so they appear as separate rows.
 - Rendered with a **neutral badge** ("Loan Payment"), the same column layout as event rows, and an **Edit** button.
-- In **monthly view**: Edit passes the synthetic ID `liab-payment-${liabId}-${periodKey}` → `openOverrideEventModal` finds it in `_evTableData` and opens "Edit Analysis Event" pre-filled as an expense.
-- In **yearly view**: Edit passes `''` (empty string, falsy) → opens "Add Analysis Event" for the year's start month.
+- Edit passes the synthetic ID `liab-payment-${liabId}-${periodKey}` → `openOverrideEventModal` finds it in `_evTableData` and opens "Edit Analysis Event" pre-filled as an expense.
 - `effectiveEvents` (the array passed to `getEventsForPeriod`) filters out `type === 'loan_payment'` entries so synthetic table entries are never double-processed.
 
 `getEventsForPeriod(periodKey, viewMode, events, cfg)` computes the period event list with inflation-adjusted amounts and cash-flow signs.

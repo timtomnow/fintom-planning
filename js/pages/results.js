@@ -684,9 +684,9 @@ function renderResults() {
               const cumCF    = acc.cumCF + cf;
               acc.cumCF = cumCF;
               const key = r.month; // 'YYYY-MM' or 'YYYY'
-              acc.html += `<tr class="result-row" style="cursor:pointer;" onclick="toggleEventDetail('${key}')">
+              acc.html += `<tr class="result-row"${vm === 'monthly' ? ` style="cursor:pointer;" onclick="toggleEventDetail('${key}')"` : ''}>
               <td class="nowrap">
-                <span id="chev-${key}" style="display:inline-block;width:14px;font-size:9px;color:var(--text-muted);vertical-align:middle;">▶</span>
+                ${vm === 'monthly' ? `<span id="chev-${key}" style="display:inline-block;width:14px;font-size:9px;color:var(--text-muted);vertical-align:middle;">▶</span>` : ''}
                 ${vm === 'yearly' ? r.month : monthLabel(r.month)}
               </td>
               <td class="text-right font-mono text-muted">${fmt$(r.startNetWorth ?? 0)}</td>
@@ -707,11 +707,11 @@ function renderResults() {
                 <td class="text-right font-mono">${fmt$(mc[i]?.p90)}</td>
               ` : ''}
             </tr>
-            <tr id="evd-${key}" style="display:none;">
+            ${vm === 'monthly' ? `<tr id="evd-${key}" style="display:none;">
               <td colspan="${numCols}" style="padding:0;background:var(--bg,#f8f9fb);border-bottom:1px solid var(--border);">
                 ${renderPeriodEvents(key)}
               </td>
-            </tr>`;
+            </tr>` : ''}`;
               return acc;
             }, { html: '', cumCF: 0 }).html}
           </tbody>
