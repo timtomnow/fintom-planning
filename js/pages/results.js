@@ -236,9 +236,14 @@ function renderEventsTableSection() {
     return true;
   });
 
+  const TYPE_ORDER = { income: 0, one_time_inflow: 1, expense: 2, loan_payment: 3, one_time_outflow: 4 };
   const sorted = filtered.slice().sort((a, b) => {
-    const cmp = a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0;
-    return _evTableSortAsc ? cmp : -cmp;
+    const dateCmp = a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0;
+    const monthCmp = _evTableSortAsc ? dateCmp : -dateCmp;
+    if (monthCmp !== 0) return monthCmp;
+    const typeCmp = (TYPE_ORDER[a.type] ?? 99) - (TYPE_ORDER[b.type] ?? 99);
+    if (typeCmp !== 0) return typeCmp;
+    return b.amount - a.amount;
   });
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / EV_PAGE_SIZE));
