@@ -208,23 +208,6 @@ function renderEventsTableSection() {
   const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time', loan_payment: 'neutral' }[t] ?? '');
 
   const cfg = state.lastRunConfig;
-  const taxRate = cfg?.taxRate ?? 0;
-  const bl = cfg ? state.data.baselines.find(b => b.id === cfg.baselineId) : null;
-
-  const calcRowCF = (e) => {
-    if (e.type === 'loan_payment') {
-      const liab = bl?.liabilities?.find(l => l.id === e._liabId);
-      return liab?.paymentAssetName ? 0 : -e.amount;
-    }
-    const isTransfer = (e.type === 'expense' || e.type === 'one_time_outflow')
-      && (e.linkedAssetName || e.linkedLiabilityName);
-    if (isTransfer) return 0;
-    if ((e.type === 'income' || e.type === 'one_time_inflow') && e.depositToAssetName) return 0;
-    if ((e.type === 'expense' || e.type === 'one_time_outflow') && e.payFromAssetName) return 0;
-    if (e.type === 'income') return e.amount * (1 - taxRate / 100);
-    if (e.type === 'one_time_inflow') return e.amount;
-    return -e.amount;
-  };
 
   const allCats  = [...new Set(_evTableData.map(e => e.category))].sort();
   const allTypes = [...new Set(_evTableData.map(e => e.type))].sort();
@@ -254,9 +237,6 @@ function renderEventsTableSection() {
   const typeDD = allTypes.map(t => `<label class="ev-filter-item"><input type="checkbox" ${_evTableTypeFilter.has(t) ? 'checked' : ''} onchange="evTableFilter('type','${esc(t)}',this.checked)"> ${typeLabel(t)}</label>`).join('');
 
   const rows = pageData.map(e => {
-    const cfAmount = calcRowCF(e);
-    const cfClass = cfAmount > 0 ? 'text-positive' : cfAmount < 0 ? 'text-negative' : 'text-muted';
-    const cfStr   = cfAmount === 0 ? '—' : (cfAmount > 0 ? '+' : '') + fmt$(cfAmount);
     const editAction = `openOverrideEventModal('${esc(cfg?.id ?? '')}','${esc(e.id)}','${esc(e.startDate)}')`;
     return `<tr>
       <td class="nowrap" style="font-size:12px;">${monthLabel(e.startDate)}</td>
@@ -264,7 +244,6 @@ function renderEventsTableSection() {
       <td class="text-muted">${esc(e.category)}</td>
       <td><span class="badge ${badgeClass(e.type)}">${typeLabel(e.type)}</span></td>
       <td class="text-right font-mono">${fmt$(e.amount)}</td>
-      <td class="text-right font-mono ${cfClass}">${cfStr}</td>
       <td><button class="btn btn-sm btn-ghost" onclick="${editAction}">Edit</button></td>
     </tr>`;
   }).join('');
@@ -307,7 +286,6 @@ function renderEventsTableSection() {
           <th style="cursor:pointer;white-space:nowrap;" onclick="evTableToggleSort()">Month <span style="font-size:11px;">${_evTableSortAsc ? '▲' : '▼'}</span></th>
           <th>Name</th><th>Category</th><th>Type</th>
           <th class="text-right">Amount</th>
-          <th class="text-right">Cash Flow</th>
           <th></th>
         </tr></thead>
         <tbody id="ev-table-body">${rows}</tbody>
