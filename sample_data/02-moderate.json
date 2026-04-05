@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "baselines": [
+    {
+      "id": "b-mod-1",
+      "name": "With Car (Current)",
+      "description": "Current setup: couple renting, TFSA investment account, and a financed vehicle.",
+      "date": "2026-04",
+      "createdAt": "2026-04-01T00:00:00.000Z",
+      "assets": [
+        {
+          "id": "a-mod-1",
+          "name": "Joint Chequing",
+          "value": 12000,
+          "category": "Bank Account",
+          "isInvestment": false,
+          "isLiquid": true,
+          "monthlyGrowthRate": 0,
+          "annualMeanReturn": 7,
+          "annualStdDev": 15
+        },
+        {
+          "id": "a-mod-2",
+          "name": "TFSA Investment",
+          "value": 45000,
+          "category": "Investment Account",
+          "isInvestment": true,
+          "isLiquid": true,
+          "monthlyGrowthRate": 0,
+          "annualMeanReturn": 7,
+          "annualStdDev": 12
+        },
+        {
+          "id": "a-mod-3",
+          "name": "Vehicle",
+          "value": 28000,
+          "category": "Vehicle",
+          "isInvestment": false,
+          "isLiquid": false,
+          "monthlyGrowthRate": -0.6,
+          "annualMeanReturn": 7,
+          "annualStdDev": 15
+        }
+      ],
+      "liabilities": [
+        {
+          "id": "l-mod-1",
+          "name": "Car Loan",
+          "value": 18500,
+          "category": "Auto Loan",
+          "annualInterestRate": 6.9,
+          "useAmortization": true,
+          "monthlyPayment": 0,
+          "includeInLiquidNW": true,
+          "paymentAssetName": "Joint Chequing",
+          "paymentMode": "calculated",
+          "paymentFrequency": "monthly",
+          "amortizationEndDate": "2030-10",
+          "termStartDate": "",
+          "termEndDate": "",
+          "renewalRate": 0
+        }
+      ]
+    },
+    {
+      "id": "b-mod-2",
+      "name": "Without Car (Alternate)",
+      "description": "Alternate scenario: sold the car, paid off the loan, net proceeds reinvested in TFSA. No car loan payment drag.",
+      "date": "2026-04",
+      "createdAt": "2026-04-01T00:00:00.000Z",
+      "assets": [
+        {
+          "id": "a-mod-4",
+          "name": "Joint Chequing",
+          "value": 12000,
+          "category": "Bank Account",
+          "isInvestment": false,
+          "isLiquid": true,
+          "monthlyGrowthRate": 0,
+          "annualMeanReturn": 7,
+          "annualStdDev": 15
+        },
+        {
+          "id": "a-mod-5",
+          "name": "TFSA Investment",
+          "value": 54500,
+          "category": "Investment Account",
+          "isInvestment": true,
+          "isLiquid": true,
+          "monthlyGrowthRate": 0,
+          "annualMeanReturn": 7,
+          "annualStdDev": 12
+        }
+      ],
+      "liabilities": []
+    }
+  ],
+  "events": [
+    {
+      "id": "e-mod-1",
+      "name": "Primary Salary",
+      "category": "Income",
+      "type": "income",
+      "amount": 7200,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": true,
+      "notes": "Gross monthly salary. After-tax amount deposits directly into Joint Chequing.",
+      "linkedAssetName": "",
+      "depositToAssetName": "Joint Chequing",
+      "payFromAssetName": "",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-mod-2",
+      "name": "Part-Time Income",
+      "category": "Income",
+      "type": "income",
+      "amount": 1800,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "2028-12",
+      "inflationAdjusted": false,
+      "notes": "Contract work expected to wrap up end of 2028. Deposits into Joint Chequing.",
+      "linkedAssetName": "",
+      "depositToAssetName": "Joint Chequing",
+      "payFromAssetName": "",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-mod-3",
+      "name": "Rent",
+      "category": "Housing",
+      "type": "expense",
+      "amount": 2100,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": true,
+      "notes": "",
+      "linkedAssetName": "",
+      "depositToAssetName": "",
+      "payFromAssetName": "Joint Chequing",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-mod-4",
+      "name": "Groceries & Dining",
+      "category": "Food & Dining",
+      "type": "expense",
+      "amount": 900,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": true,
+      "notes": "",
+      "linkedAssetName": "",
+      "depositToAssetName": "",
+      "payFromAssetName": "Joint Chequing",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-mod-5",
+      "name": "Entertainment & Subscriptions",
+      "category": "Entertainment",
+      "type": "expense",
+      "amount": 400,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": false,
+      "notes": "",
+      "linkedAssetName": "",
+      "depositToAssetName": "",
+      "payFromAssetName": "Joint Chequing",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-mod-6",
+      "name": "Auto & Renters Insurance",
+      "category": "Insurance",
+      "type": "expense",
+      "amount": 260,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": false,
+      "notes": "Combined car and renters insurance. Paid from Joint Chequing.",
+      "linkedAssetName": "",
+      "depositToAssetName": "",
+      "payFromAssetName": "Joint Chequing",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-mod-7",
+      "name": "Monthly TFSA Contribution",
+      "category": "Savings & Investment",
+      "type": "expense",
+      "amount": 1200,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": false,
+      "notes": "Transfers $1,200/mo from Joint Chequing into TFSA Investment. Net worth is unchanged — this is a transfer, not a true expense.",
+      "linkedAssetName": "TFSA Investment",
+      "depositToAssetName": "",
+      "payFromAssetName": "Joint Chequing",
+      "linkedLiabilityName": ""
+    }
+  ],
+  "eventSets": [
+    {
+      "id": "es-mod-1",
+      "name": "Monthly Household",
+      "description": "All recurring income, expenses, and investment transfers for the household.",
+      "eventIds": ["e-mod-1", "e-mod-2", "e-mod-3", "e-mod-4", "e-mod-5", "e-mod-6", "e-mod-7"]
+    }
+  ],
+  "analysisConfigs": [
+    {
+      "id": "c-mod-1",
+      "name": "10-Year Monte Carlo (With Car)",
+      "baselineId": "b-mod-1",
+      "compareBaselineId": "",
+      "eventSetIds": ["es-mod-1"],
+      "compareEventSetIds": [],
+      "startDate": "2026-04",
+      "endDate": "2036-04",
+      "viewMode": "yearly",
+      "inflationRate": 3,
+      "taxRate": 25,
+      "monteCarlo": {
+        "enabled": true,
+        "numSimulations": 500,
+        "standardOfLivingMonthly": 5000
+      },
+      "eventOverrides": [],
+      "resultsStale": false
+    },
+    {
+      "id": "c-mod-2",
+      "name": "10-Year Comparison: Car vs No Car",
+      "baselineId": "b-mod-1",
+      "compareBaselineId": "b-mod-2",
+      "eventSetIds": ["es-mod-1"],
+      "compareEventSetIds": ["es-mod-1"],
+      "startDate": "2026-04",
+      "endDate": "2036-04",
+      "viewMode": "yearly",
+      "inflationRate": 3,
+      "taxRate": 25,
+      "monteCarlo": {
+        "enabled": false,
+        "numSimulations": 500,
+        "standardOfLivingMonthly": 0
+      },
+      "eventOverrides": [],
+      "resultsStale": false
+    }
+  ],
+  "settings": {
+    "defaultInflationRate": 3,
+    "defaultTaxRate": 25
+  }
+}

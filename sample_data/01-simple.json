@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "baselines": [
+    {
+      "id": "b-simple-1",
+      "name": "April 2026",
+      "description": "Starting snapshot for a single person renting an apartment.",
+      "date": "2026-04",
+      "createdAt": "2026-04-01T00:00:00.000Z",
+      "assets": [
+        {
+          "id": "a-simple-1",
+          "name": "Chequing",
+          "value": 8500,
+          "category": "Bank Account",
+          "isInvestment": false,
+          "isLiquid": true,
+          "monthlyGrowthRate": 0,
+          "annualMeanReturn": 7,
+          "annualStdDev": 15
+        },
+        {
+          "id": "a-simple-2",
+          "name": "High-Interest Savings",
+          "value": 22000,
+          "category": "Bank Account",
+          "isInvestment": false,
+          "isLiquid": true,
+          "monthlyGrowthRate": 0.35,
+          "annualMeanReturn": 7,
+          "annualStdDev": 15
+        }
+      ],
+      "liabilities": []
+    }
+  ],
+  "events": [
+    {
+      "id": "e-simple-1",
+      "name": "Monthly Salary",
+      "category": "Income",
+      "type": "income",
+      "amount": 5500,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": true,
+      "notes": "Gross monthly salary. After-tax amount deposits directly into Chequing.",
+      "linkedAssetName": "",
+      "depositToAssetName": "Chequing",
+      "payFromAssetName": "",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-simple-2",
+      "name": "Rent",
+      "category": "Housing",
+      "type": "expense",
+      "amount": 1850,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": true,
+      "notes": "",
+      "linkedAssetName": "",
+      "depositToAssetName": "",
+      "payFromAssetName": "Chequing",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-simple-3",
+      "name": "Groceries",
+      "category": "Food & Dining",
+      "type": "expense",
+      "amount": 650,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": true,
+      "notes": "",
+      "linkedAssetName": "",
+      "depositToAssetName": "",
+      "payFromAssetName": "Chequing",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-simple-4",
+      "name": "Utilities",
+      "category": "Utilities",
+      "type": "expense",
+      "amount": 180,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": true,
+      "notes": "",
+      "linkedAssetName": "",
+      "depositToAssetName": "",
+      "payFromAssetName": "Chequing",
+      "linkedLiabilityName": ""
+    },
+    {
+      "id": "e-simple-5",
+      "name": "Transit & Transport",
+      "category": "Transportation",
+      "type": "expense",
+      "amount": 200,
+      "stdDevAmount": 0,
+      "isRecurring": true,
+      "startDate": "2026-04",
+      "endDate": "",
+      "inflationAdjusted": false,
+      "notes": "",
+      "linkedAssetName": "",
+      "depositToAssetName": "",
+      "payFromAssetName": "Chequing",
+      "linkedLiabilityName": ""
+    }
+  ],
+  "eventSets": [],
+  "analysisConfigs": [
+    {
+      "id": "c-simple-1",
+      "name": "5-Year Outlook",
+      "baselineId": "b-simple-1",
+      "compareBaselineId": "",
+      "eventSetIds": [],
+      "compareEventSetIds": [],
+      "startDate": "2026-04",
+      "endDate": "2031-04",
+      "viewMode": "yearly",
+      "inflationRate": 3,
+      "taxRate": 22,
+      "monteCarlo": {
+        "enabled": false,
+        "numSimulations": 500,
+        "standardOfLivingMonthly": 0
+      },
+      "eventOverrides": [],
+      "resultsStale": false
+    }
+  ],
+  "settings": {
+    "defaultInflationRate": 3,
+    "defaultTaxRate": 22
+  }
+}
