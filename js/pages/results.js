@@ -822,26 +822,40 @@ function renderResults() {
         <button class="btn btn-sm btn-ghost" style="margin-left:8px;" onclick="openOverrideEventModal('${esc(cfg.id)}',null,'${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">+ Add Event</button>
       </div>`;
     }
-    const evRows = periodEvs.map(({ ev, amount, cfAmount }) => `<tr>
-      <td style="padding:5px 8px;">${esc(ev.name)}</td>
-      <td style="padding:5px 8px;" class="text-muted">${esc(ev.category)}</td>
-      <td style="padding:5px 8px;"><span class="badge ${badgeClass(ev.type)}">${typeLabel(ev.type)}</span></td>
-      <td style="padding:5px 8px;" class="text-right font-mono">${fmt$(amount)}</td>
-      <td style="padding:5px 8px;" class="text-right font-mono ${cfAmount > 0 ? 'text-positive' : cfAmount < 0 ? 'text-negative' : 'text-muted'}">${cfAmount === 0 ? '—' : (cfAmount > 0 ? '+' : '') + fmt$(cfAmount)}</td>
-      <td style="padding:5px 8px;">
-        <button class="btn btn-sm btn-ghost" onclick="openOverrideEventModal('${esc(cfg.id)}','${esc(ev.id)}','${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">Edit</button>
-      </td>
-    </tr>`).join('');
-    const liabRows = liabEntries.map(({ liabId, name, category, payment, cfAmount }) => `<tr>
-      <td style="padding:5px 8px;">${esc(name)}</td>
-      <td style="padding:5px 8px;" class="text-muted">${esc(category)}</td>
-      <td style="padding:5px 8px;"><span class="badge ${badgeClass('loan_payment')}">${typeLabel('loan_payment')}</span></td>
-      <td style="padding:5px 8px;" class="text-right font-mono">${fmt$(payment)}</td>
-      <td style="padding:5px 8px;" class="text-right font-mono ${cfAmount < 0 ? 'text-negative' : 'text-muted'}">${cfAmount === 0 ? '—' : fmt$(cfAmount)}</td>
-      <td style="padding:5px 8px;">
-        <button class="btn btn-sm btn-ghost" onclick="openOverrideEventModal('${esc(cfg.id)}','${vm === 'monthly' ? `liab-payment-${esc(liabId)}-${esc(periodKey)}` : ''}','${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">Edit</button>
-      </td>
-    </tr>`).join('');
+    const PERIOD_TYPE_ORDER = { income: 0, one_time_inflow: 1, expense: 2, loan_payment: 3, one_time_outflow: 4 };
+    const combined = [
+      ...periodEvs.map(({ ev, amount }) => ({ kind: 'ev', type: ev.type, amount, ev })),
+      ...liabEntries.map(({ liabId, name, category, payment }) => ({ kind: 'liab', type: 'loan_payment', amount: payment, liabId, name, category })),
+    ].sort((a, b) => {
+      const typeCmp = (PERIOD_TYPE_ORDER[a.type] ?? 99) - (PERIOD_TYPE_ORDER[b.type] ?? 99);
+      if (typeCmp !== 0) return typeCmp;
+      return b.amount - a.amount;
+    });
+    const allRows = combined.map(item => {
+      if (item.kind === 'ev') {
+        const { ev, amount } = item;
+        return `<tr>
+          <td style="padding:5px 8px;">${esc(ev.name)}</td>
+          <td style="padding:5px 8px;" class="text-muted">${esc(ev.category)}</td>
+          <td style="padding:5px 8px;"><span class="badge ${badgeClass(ev.type)}">${typeLabel(ev.type)}</span></td>
+          <td style="padding:5px 8px;" class="text-right font-mono">${fmt$(amount)}</td>
+          <td style="padding:5px 8px;">
+            <button class="btn btn-sm btn-ghost" onclick="openOverrideEventModal('${esc(cfg.id)}','${esc(ev.id)}','${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">Edit</button>
+          </td>
+        </tr>`;
+      } else {
+        const { liabId, name, category } = item;
+        return `<tr>
+          <td style="padding:5px 8px;">${esc(name)}</td>
+          <td style="padding:5px 8px;" class="text-muted">${esc(category)}</td>
+          <td style="padding:5px 8px;"><span class="badge ${badgeClass('loan_payment')}">${typeLabel('loan_payment')}</span></td>
+          <td style="padding:5px 8px;" class="text-right font-mono">${fmt$(item.amount)}</td>
+          <td style="padding:5px 8px;">
+            <button class="btn btn-sm btn-ghost" onclick="openOverrideEventModal('${esc(cfg.id)}','${vm === 'monthly' ? `liab-payment-${esc(liabId)}-${esc(periodKey)}` : ''}','${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">Edit</button>
+          </td>
+        </tr>`;
+      }
+    }).join('');
     return `<div style="padding:6px 12px 12px;">
       <table style="font-size:12.5px;width:100%;border-collapse:collapse;">
         <thead><tr style="border-bottom:1px solid var(--border);">
@@ -849,10 +863,9 @@ function renderResults() {
           <th style="padding:5px 8px;text-align:left;font-weight:600;">Category</th>
           <th style="padding:5px 8px;text-align:left;font-weight:600;">Type</th>
           <th style="padding:5px 8px;text-align:right;font-weight:600;">Amount</th>
-          <th style="padding:5px 8px;text-align:right;font-weight:600;">Cash Flow</th>
           <th></th>
         </tr></thead>
-        <tbody>${evRows}${liabRows}</tbody>
+        <tbody>${allRows}</tbody>
       </table>
       <button class="btn btn-sm btn-ghost" style="margin-top:6px;font-size:12px;" onclick="openOverrideEventModal('${esc(cfg.id)}',null,'${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">+ Add Event to this period</button>
     </div>`;
