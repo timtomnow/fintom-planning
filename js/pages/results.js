@@ -1138,16 +1138,17 @@ function renderResults() {
   }
 
   const hasCompare = !!(run.cmpResults && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
-  // numCols is only used for colspan in expandable monthly rows (base scenario only)
-  const numCols = 12 + (cmp ? 1 : 0) + (mc ? 3 : 0);
-
-  // Overview table scenario: when showing compare, use cmp data; disable extra columns + expandable rows
+  // Overview table scenario: when showing compare, use cmp data and hide extra columns
   const showCmpOverview = hasCompare && _overviewScenario === 'compare';
+  // numCols drives colspan in expandable monthly rows; matches actual column count
+  const numCols = showCmpOverview ? 12 : 12 + (cmp ? 1 : 0) + (mc ? 3 : 0);
   const ovDet  = showCmpOverview ? (cmp ?? det) : det;
   const ovCmp  = showCmpOverview ? null : cmp;
   const ovMc   = showCmpOverview ? null : mc;
   // Exclude synthetic loan_payment entries from event processing — they're handled by liabEntries
-  const effectiveEvents = _evTableData.filter(e => e.type !== 'loan_payment');
+  const effectiveEvents    = _evTableData.filter(e => e.type !== 'loan_payment');
+  const cmpEffectiveEvents = _cmpEvTableData.filter(e => e.type !== 'loan_payment');
+  const cmpBl = cBl ?? pBl; // compare baseline (falls back to primary for same-baseline comparisons)
   const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out', loan_payment: 'Loan Payment' }[t] ?? t);
   const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time', loan_payment: 'neutral' }[t] ?? '');
 
@@ -1253,6 +1254,83 @@ function renderResults() {
         <tbody>${allRows}</tbody>
       </table>
       <button class="btn btn-sm btn-ghost" style="margin-top:6px;font-size:12px;" onclick="openOverrideEventModal('${esc(cfg.id)}',null,'${esc(vm === 'yearly' ? periodKey + '-01' : periodKey)}')">+ Add Event to this period</button>
+    </div>`;
+  };
+
+  // Read-only version of renderPeriodEvents for the compare scenario.
+  // Uses cmpEffectiveEvents and run.cmpResults; no Edit/Add buttons.
+  const renderCmpPeriodEvents = (periodKey) => {
+    const periodEvs = getEventsForPeriod(periodKey, vm, cmpEffectiveEvents, cfg);
+
+    const liabEntries = [];
+    const cmpMonthly = run.cmpResults;
+    if (cmpBl && cmpMonthly) {
+      for (const l of (cmpBl.liabilities ?? [])) {
+        if (!l.useAmortization) continue;
+        const months = vm === 'monthly'
+          ? [periodKey]
+          : Array.from({ length: 12 }, (_, i) => `${periodKey}-${String(i + 1).padStart(2, '0')}`)
+              .filter(m => m >= cfg.startDate && m <= cfg.endDate);
+        let totalPayment = 0;
+        for (const month of months) {
+          const currIdx = cmpMonthly.findIndex(r => r.month === month);
+          if (currIdx < 0) continue;
+          const currResult = cmpMonthly[currIdx];
+          const prevResult = currIdx > 0 ? cmpMonthly[currIdx - 1] : null;
+          const currBalance = currResult.liabSnapshots?.find(s => s.id === l.id)?.value ?? 0;
+          const prevBalance = prevResult
+            ? (prevResult.liabSnapshots?.find(s => s.id === l.id)?.value ?? l.value)
+            : l.value;
+          if (prevBalance <= 0) continue;
+          const effectiveRate = (l.termEndDate && month > l.termEndDate && (l.renewalRate ?? 0) > 0)
+            ? l.renewalRate : (l.annualInterestRate ?? 0);
+          const interest = prevBalance * effectiveRate / 12 / 100;
+          const extraPrincipal = cmpEffectiveEvents
+            .filter(ev => ev.linkedLiabilityName === l.name && isEventActive(ev, month))
+            .reduce((s, ev) => s + (ev.amount ?? 0), 0);
+          const payment = Math.max(0, (prevBalance - currBalance - extraPrincipal) + interest);
+          if (payment <= 0) continue;
+          totalPayment += payment;
+        }
+        if (totalPayment > 0) {
+          liabEntries.push({ name: l.name, category: l.category ?? 'Liability', payment: totalPayment });
+        }
+      }
+    }
+
+    if (!periodEvs.length && !liabEntries.length) {
+      return `<div style="padding:8px 16px 12px;font-size:13px;color:var(--text-muted);">No events in this period.</div>`;
+    }
+    const PERIOD_TYPE_ORDER = { income: 0, one_time_inflow: 1, expense: 2, loan_payment: 3, one_time_outflow: 4 };
+    const combined = [
+      ...periodEvs.map(({ ev, amount }) => ({ kind: 'ev', type: ev.type, amount, ev })),
+      ...liabEntries.map(({ name, category, payment }) => ({ kind: 'liab', type: 'loan_payment', amount: payment, name, category })),
+    ].sort((a, b) => {
+      const typeCmp = (PERIOD_TYPE_ORDER[a.type] ?? 99) - (PERIOD_TYPE_ORDER[b.type] ?? 99);
+      if (typeCmp !== 0) return typeCmp;
+      return b.amount - a.amount;
+    });
+    const allRows = combined.map(item => {
+      const t = item.kind === 'ev' ? item.ev.type : 'loan_payment';
+      const rowName = item.kind === 'ev' ? item.ev.name : item.name;
+      const rowCat  = item.kind === 'ev' ? item.ev.category : item.category;
+      return `<tr>
+        <td style="padding:5px 8px;">${esc(rowName)}</td>
+        <td style="padding:5px 8px;" class="text-muted">${esc(rowCat)}</td>
+        <td style="padding:5px 8px;"><span class="badge ${badgeClass(t)}">${typeLabel(t)}</span></td>
+        <td style="padding:5px 8px;" class="text-right font-mono">${fmt$(item.amount)}</td>
+      </tr>`;
+    }).join('');
+    return `<div style="padding:6px 12px 12px;">
+      <table style="font-size:12.5px;width:100%;border-collapse:collapse;">
+        <thead><tr style="border-bottom:1px solid var(--border);">
+          <th style="padding:5px 8px;text-align:left;font-weight:600;">Name</th>
+          <th style="padding:5px 8px;text-align:left;font-weight:600;">Category</th>
+          <th style="padding:5px 8px;text-align:left;font-weight:600;">Type</th>
+          <th style="padding:5px 8px;text-align:right;font-weight:600;">Amount</th>
+        </tr></thead>
+        <tbody>${allRows}</tbody>
+      </table>
     </div>`;
   };
 
@@ -1391,7 +1469,7 @@ function renderResults() {
               const cumCF    = acc.cumCF + cf;
               acc.cumCF = cumCF;
               const key = r.month; // 'YYYY-MM' or 'YYYY'
-              const expandable = vm === 'monthly' && !showCmpOverview;
+              const expandable = vm === 'monthly'; // both base and compare scenarios support expandable rows
               acc.html += `<tr class="result-row"${expandable ? ` style="cursor:pointer;" onclick="toggleEventDetail('${key}')"` : ''}>
               <td class="nowrap">
                 ${expandable ? `<span id="chev-${key}" style="display:inline-block;width:14px;font-size:9px;color:var(--text-muted);vertical-align:middle;">▶</span>` : ''}
@@ -1417,7 +1495,7 @@ function renderResults() {
             </tr>
             ${expandable ? `<tr id="evd-${key}" style="display:none;">
               <td colspan="${numCols}" style="padding:0;background:var(--bg,#f8f9fb);border-bottom:1px solid var(--border);">
-                ${renderPeriodEvents(key)}
+                ${showCmpOverview ? renderCmpPeriodEvents(key) : renderPeriodEvents(key)}
               </td>
             </tr>` : ''}`;
               return acc;
