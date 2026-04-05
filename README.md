@@ -193,7 +193,7 @@ In **Monthly view**, each row has a chevron and is clickable. Click a row to exp
 
 Annual view rows are not expandable; switch to Monthly view to inspect or edit individual period events.
 
-The **Cash Flow** column in the expanded sub-table reflects the actual impact on the cash accumulator: events routed through assets (via "Deposit into Asset" or "Pay from Asset") show `—` since they do not affect the cash pool directly.
+The expanded sub-table shows **Name, Category, Type, Amount**, and an Edit button. Rows are sorted by type (Income → One-time In → Expense → Loan Payment → One-time Out), then by amount largest-to-smallest within each type.
 
 After editing, a warning banner appears at the top of the page indicating the results are out of date. Click **Re-run now** or the **Re-Run** button in the header to refresh.
 
@@ -211,7 +211,7 @@ A full list of all events used in the analysis, including one row per monthly lo
 
 **Name search:** Type in the search box and click the **🔍** button (or press Enter) to apply the filter. The table does not refresh on every keystroke — the filter is only applied when you commit it. Click **Clear filters** to reset all active filters including the search.
 
-Columns: **Month** (when the event occurs), **Name**, **Category**, **Type**, **Amount**, **Cash Flow** (actual impact on the cash accumulator), and an **Edit** button. The Cash Flow column accounts for asset routing — events sent to or paid from an asset show `—` rather than a misleading cash impact.
+Columns: **Month**, **Name**, **Category**, **Type**, **Amount**, and an **Edit** button. Within each month, rows are sorted by type (Income → One-time In → Expense → Loan Payment → One-time Out), then by amount largest-to-smallest.
 
 Click **Edit** on any row to open the override modal for that event, or to create a pre-filled override for a Loan Payment row. Click **Export CSV** to download the full list.
 
