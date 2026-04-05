@@ -279,3 +279,4 @@ To load a file: **Settings → Import Data (JSON)** → select the file. **This 
 | `01-simple.json` | Single person, basic 5-year outlook | One baseline, a handful of income and expense events, one analysis config |
 | `02-moderate.json` | Household with a car-purchase decision | Two baselines (with car / without car), a scenario comparison config, one event set, Monte Carlo enabled |
 | `03-complex.json` | Family with mortgage and long-term planning | Full mortgage with term renewal and amortization, 14 events, two analysis configs (25-year Monte Carlo and 5-year near-term), one event set |
+| `04-mortgagepaydown.json` | Mortgage paydown scenario comparison | $500k mortgage, 5.5% 5-year term, 25-year amortization. Two analyses: (1) base vs $10k/year annual prepayments; (2) base vs $50k lump sum at month 3 plus $500/month extra |

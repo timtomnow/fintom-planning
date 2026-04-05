@@ -502,6 +502,7 @@ The `sample_data/` directory contains three importable JSON files for demo and o
 | `01-simple.json` | Single baseline, 5 events, one analysis config — good for a quick smoke test |
 | `02-moderate.json` | Two baselines (car / no car), 7 events, one event set, comparison + Monte Carlo configs |
 | `03-complex.json` | One baseline with full mortgage amortization, 14 events, one event set, two analysis configs |
+| `04-mortgagepaydown.json` | One baseline ($500k mortgage, 5.5%/5yr term, 25yr amort), 24 events, two event sets, two comparison configs: base vs annual $10K lump-sum prepayments, and base vs $50K lump sum + $500/mo extra |
 
 These files conform to the `state.data` shape (`version`, `baselines`, `events`, `eventSets`, `analysisConfigs`, `settings`). They are loaded via **Settings → Import Data (JSON)** — importing replaces the current `localStorage` state.
 
