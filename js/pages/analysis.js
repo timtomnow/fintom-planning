@@ -250,10 +250,31 @@ function resolveEffectiveEvents(cfg) {
   const base = resolveEventSets(cfg.eventSetIds);
   const overrides = cfg.eventOverrides ?? [];
   if (!overrides.length) return base;
-  const overrideMap = new Map(overrides.map(e => [e.id, e]));
-  const merged = base.map(e => overrideMap.has(e.id) ? overrideMap.get(e.id) : e);
+
+  // Monthly per-instance overrides have _sourceId set (created by editing a single month
+  // of a recurring event). Separate them from regular full-event overrides.
+  const monthlyOverrides  = overrides.filter(e => e._sourceId);
+  const regularOverrides  = overrides.filter(e => !e._sourceId);
+
+  // Build excluded-months map: originalEventId -> Set<month>
+  // The original recurring event must NOT fire in these months (the monthly override fires instead).
+  const excludedMonths = new Map();
+  for (const mo of monthlyOverrides) {
+    if (!excludedMonths.has(mo._sourceId)) excludedMonths.set(mo._sourceId, new Set());
+    excludedMonths.get(mo._sourceId).add(mo._month);
+  }
+
+  const overrideMap = new Map(regularOverrides.map(e => [e.id, e]));
+  const merged = base.map(e => {
+    let result = overrideMap.has(e.id) ? overrideMap.get(e.id) : e;
+    const excl = excludedMonths.get(e.id);
+    if (excl) result = { ...result, _excludedMonths: excl };
+    return result;
+  });
   const baseIds = new Set(base.map(e => e.id));
-  overrides.filter(e => !baseIds.has(e.id)).forEach(e => merged.push(e));
+  regularOverrides.filter(e => !baseIds.has(e.id)).forEach(e => merged.push(e));
+  // Append monthly overrides — each is a one-time event for its specific month
+  monthlyOverrides.forEach(e => merged.push(e));
   return merged;
 }
 

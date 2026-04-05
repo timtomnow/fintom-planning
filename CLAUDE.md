@@ -223,7 +223,11 @@ Event sets are named collections of events attached to a specific analysis confi
 }
 ```
 
-`eventOverrides` — array of full Event objects. When running, these replace matching global events by ID and new IDs are appended. Managed via the expandable-row edit UI in the Results page. Global events on the Events page are never touched.
+`eventOverrides` — array of full Event objects. Two kinds:
+- **Regular overrides** (no `_sourceId`): replace the matching global event by ID, or are appended if the ID is new.
+- **Monthly overrides** (have `_sourceId` and `_month`): scoped to a single occurrence of a recurring event. The original event is excluded for that month (via `_excludedMonths` in `resolveEffectiveEvents`), and the monthly override fires as a one-time event. ID format: `monthly-${sourceId}-${month}`. Created when the user edits a specific month's row in the All Analysis Events table.
+
+Managed via the expandable-row edit UI in the Results page. Global events on the Events page are never touched.
 
 `resultsStale` — set to `true` by `markResultsStale()` after any override change. Reset to `false` by `runAndView()`. When true, a warning banner is shown on the Results page with a re-run link.
 
@@ -338,6 +342,11 @@ Event lookup order for `existingId`:
 
 When `existingId` resolves to a synthetic `loan_payment` entry in `_evTableData`, the entry is remapped to `type: 'expense', isRecurring: false, endDate: ''` before pre-populating the form, since `loan_payment` is not a user-editable type. The modal title shows "Edit Analysis Event" when any lookup succeeds, "Add Analysis Event" when `existingId` is null or unresolved.
 
+When `existingId` is a per-month expansion of a recurring event (ID `monthly-${sourceId}-${month}`), `ev._sourceId` is set. In this case:
+- The **Recurring** checkbox and **Adjust for inflation** row are hidden (`display:none`).
+- The date field is `readonly` (locked to the specific month).
+- On save, `isRecurring` and `inflationAdjusted` are forced to `false`, and `_sourceId`/`_month` are preserved so `resolveEffectiveEvents` can suppress the original event for that month.
+
 `onOevTypeChange()` / `onOevRecChange()` — toggle visibility of conditional fields inside the override modal (same pattern as `onEvTypeChange` / `onEvRecChange`).
 
 ### Stale Warning Banner
@@ -347,7 +356,7 @@ When `existingId` resolves to a synthetic `loan_payment` entry in `_evTableData`
 ### All Analysis Events Table
 
 `renderEventsTableSection()` — renders the paginated, filterable events table at the bottom of the Results page into `<div id="ev-table-section">`. Module-level state:
-- `_evTableData` — built in `renderResults`: starts as `resolveEffectiveEvents(cfg)`, then synthetic `loan_payment` entries are appended (one per month per amortizing liability)
+- `_evTableData` — built in `renderResults`: recurring events from `resolveEffectiveEvents(cfg)` are expanded into per-month entries (one row per active month, with inflation pre-applied), one-time events are included once, and synthetic `loan_payment` entries are appended (one per month per amortizing liability). Each per-month recurring row has a synthetic ID `monthly-${ev.id}-${month}`, `_sourceId = ev.id`, `_month = month`, `isRecurring: false`, `inflationAdjusted: false`.
 - `_evTablePage` — current page index (0-based)
 - `_evTableCatFilter`, `_evTableTypeFilter` — `Set` of active filter values
 - `_evTableNameFilter` — text search string

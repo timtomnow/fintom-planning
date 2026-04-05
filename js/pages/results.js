@@ -41,6 +41,8 @@ function openOverrideEventModal(cfgId, existingId, defaultMonth) {
       : { ...existingTable };
   }
   const ev = existing ? { ...existing } : { ...defaultEvent(), startDate: defaultMonth ?? today() };
+  // Per-month entries (edits scoped to a single occurrence of a recurring event)
+  const isMonthly = !!ev._sourceId;
 
   const allAssetNames = [...new Set(
     state.data.baselines.flatMap(bl => (bl.assets ?? []).map(a => a.name).filter(Boolean))
@@ -82,7 +84,7 @@ function openOverrideEventModal(cfgId, existingId, defaultMonth) {
         <input type="number" id="oev-amt" value="${ev.amount}" step="100">
       </div>
     </div>
-    <div class="form-group">
+    <div class="form-group" ${isMonthly ? 'style="display:none"' : ''}>
       <label class="checkbox-label">
         <input type="checkbox" id="oev-rec" ${ev.isRecurring ? 'checked' : ''} onchange="onOevRecChange()">
         Recurring — happens every month
@@ -91,14 +93,14 @@ function openOverrideEventModal(cfgId, existingId, defaultMonth) {
     <div class="form-row">
       <div class="form-group">
         <label id="oev-start-lbl">${ev.isRecurring ? 'Start Date' : 'Date'}</label>
-        <input type="month" id="oev-start" value="${ev.startDate}">
+        <input type="month" id="oev-start" value="${ev.startDate}"${isMonthly ? ' readonly' : ''}>
       </div>
       <div class="form-group" id="oev-end-wrap" ${!ev.isRecurring ? 'style="display:none"' : ''}>
         <label>End Date <span class="label-note">(blank = indefinite)</span></label>
         <input type="month" id="oev-end" value="${ev.endDate ?? ''}">
       </div>
     </div>
-    <div class="form-row">
+    <div class="form-row" ${isMonthly ? 'style="display:none"' : ''}>
       <div class="form-group">
         <label class="checkbox-label"><input type="checkbox" id="oev-inf" ${ev.inflationAdjusted ? 'checked' : ''}> Adjust for inflation</label>
       </div>
@@ -134,16 +136,23 @@ function openOverrideEventModal(cfgId, existingId, defaultMonth) {
       type,
       amount: parseFloat(document.getElementById('oev-amt').value) || 0,
       stdDevAmount: 0,
-      isRecurring: document.getElementById('oev-rec').checked,
+      // Per-month overrides are always one-time and never inflation-adjusted (amount is pre-applied)
+      isRecurring: isMonthly ? false : document.getElementById('oev-rec').checked,
       startDate,
-      endDate: document.getElementById('oev-end').value || '',
-      inflationAdjusted: document.getElementById('oev-inf').checked,
+      endDate: isMonthly ? '' : (document.getElementById('oev-end').value || ''),
+      inflationAdjusted: isMonthly ? false : document.getElementById('oev-inf').checked,
       notes: '',
       linkedAssetName:     isOut ? document.getElementById('oev-link-asset').value     : '',
       depositToAssetName:  isIn  ? document.getElementById('oev-deposit-asset').value  : '',
       payFromAssetName:    isOut ? document.getElementById('oev-pay-from-asset').value  : '',
       linkedLiabilityName: isOut ? document.getElementById('oev-link-liab').value       : '',
     };
+    // Preserve monthly-override routing fields so resolveEffectiveEvents can exclude
+    // the corresponding month from the original recurring event
+    if (isMonthly) {
+      updated._sourceId = ev._sourceId;
+      updated._month    = ev._month;
+    }
     if (!cfg.eventOverrides) cfg.eventOverrides = [];
     const idx = cfg.eventOverrides.findIndex(e => e.id === updated.id);
     if (idx >= 0) cfg.eventOverrides[idx] = updated;
@@ -383,8 +392,45 @@ function renderResults() {
 
   const mcFinal = mc ? mc[mc.length - 1] : null;
 
-  // Populate events table data before rendering
-  _evTableData = resolveEffectiveEvents(cfg);
+  // Populate events table data before rendering.
+  // Recurring events are expanded into one entry per active month so the table
+  // shows every occurrence individually and each month can be edited independently.
+  const baseEvents = resolveEffectiveEvents(cfg);
+  _evTableData = [];
+  for (const ev of baseEvents) {
+    // Monthly per-instance overrides are already one-time for a specific month — add directly
+    if (ev._sourceId) {
+      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _evTableData.push(ev);
+      continue;
+    }
+    const isOneTime = !ev.isRecurring || ev.type === 'one_time_inflow' || ev.type === 'one_time_outflow';
+    if (isOneTime) {
+      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _evTableData.push(ev);
+    } else {
+      // Expand recurring: one entry per active month within the analysis range
+      const startM = ev.startDate > cfg.startDate ? ev.startDate : cfg.startDate;
+      const endM   = ev.endDate ? (ev.endDate < cfg.endDate ? ev.endDate : cfg.endDate) : cfg.endDate;
+      let month = startM;
+      while (month <= endM) {
+        if (!ev._excludedMonths?.has(month)) {
+          const inflMult = (ev.inflationAdjusted && cfg.inflationRate)
+            ? Math.pow(1 + cfg.inflationRate / 12 / 100, monthsBetween(cfg.startDate, month))
+            : 1;
+          _evTableData.push({
+            ...ev,
+            id: `monthly-${ev.id}-${month}`,
+            _sourceId: ev.id,
+            _month: month,
+            startDate: month,
+            isRecurring: false,
+            inflationAdjusted: false,
+            amount: ev.amount * inflMult,
+          });
+        }
+        month = addMonths(month, 1);
+      }
+    }
+  }
 
   // Append one synthetic loan-payment entry per month per amortizing liability.
   // Pre-capture user events before synthetics are added for extra-principal lookup.

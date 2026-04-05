@@ -87,6 +87,7 @@ function pctValue(sortedArr, p) {
 function isEventActive(event, month) {
   if (!event.startDate) return false;
   if (month < event.startDate) return false;
+  if (event._excludedMonths?.has(month)) return false;
   const oneTime = !event.isRecurring ||
     event.type === 'one_time_inflow' || event.type === 'one_time_outflow';
   if (oneTime) return month === event.startDate;
