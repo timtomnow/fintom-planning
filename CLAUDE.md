@@ -18,7 +18,7 @@ This is a self-contained, single-page financial planning app. No framework, no b
 | `js/pages/baselines.js` | renderBaselines, renderBaselineDetail, openBaselineModal, duplicateBaseline, deleteBaseline, openAssetModal, toggleInvestFields, deleteAsset, openLiabilityModal, toggleAmortFields, onPayModeChange, deleteLiability. |
 | `js/pages/events.js` | renderEvents, openEventModal, onEvTypeChange, onEvRecChange, deleteEvent, renderEventSets, renderEventSetDetail, openEventSetModal, openEventSetEventsModal, removeEventFromSet, deleteEventSet. |
 | `js/pages/analysis.js` | renderAnalysis, openConfigModal, toggleMCFields, deleteConfig, resolveEventSets, resolveEffectiveEvents, getEventsForPeriod, runAndView. |
-| `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, _cmpEvTableData, renderEventsTableSection, etc.), tab state (_resultsTab, _brSelectedItem, _brChart, _overviewScenario, _evTableScenario) + functions (switchResultsTab, switchOverviewScenario, switchEvTableScenario, renderBalanceReviewContent, attachBalanceReviewChart, onBrItemChange), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt. |
+| `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, _cmpEvTableData, renderEventsTableSection, etc.), tab state (_resultsTab, _brSelectedItem, _brChart, _overviewScenario, _evTableScenario) + functions (switchResultsTab, switchOverviewScenario, switchEvTableScenario, renderBalanceReviewContent, attachBalanceReviewChart, onBrItemChange, renderBaselineValuesContent), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt, updateBaselineCmpValuesAt. |
 | `js/pages/settings.js` | renderSettings, saveSettings, confirmClear. |
 | `README.md` | End-user instructions (Markdown). |
 
@@ -309,21 +309,23 @@ Simple line chart of the engine `cashFlow` accumulator over time, fill to origin
 
 ### Tab Structure
 
-The Results page uses three tabs managed by module-level state:
+The Results page uses four tabs managed by module-level state:
 
-- `_resultsTab` — `'overview'` | `'events'` | `'balance-review'` (persists during the session; survives view-mode switches)
-- `switchResultsTab(tab)` — toggles `display` on `#results-tab-overview`, `#results-tab-events`, `#results-tab-balance-review` divs and updates `.results-tab-btn.active`; calls `_refreshBalanceReview()` when switching to the balance-review tab
+- `_resultsTab` — `'overview'` | `'events'` | `'balance-review'` | `'baseline-values'` (persists during the session; survives view-mode switches)
+- `switchResultsTab(tab)` — toggles `display` on `#results-tab-overview`, `#results-tab-events`, `#results-tab-balance-review`, `#results-tab-baseline-values` divs and updates `.results-tab-btn.active`; calls `_refreshBalanceReview()` when switching to the balance-review tab
 
 **Compare scenario state** (only active when `cfg.compareBaselineId` or `cfg.compareEventSetIds` is set):
 - `_overviewScenario` — `'base'` | `'compare'`; controls which scenario's Monthly Detail and Baseline Values tables are shown in the Overview tab. Toggled by a **Tables showing:** toggle that appears below the charts. Switching calls `switchOverviewScenario(scenario)` which triggers a full `navigate('results')` re-render (needed to preserve expandable rows).
 - `_evTableScenario` — `'base'` | `'compare'`; controls which scenario is shown in the Event Details tab. Toggled by a **Scenario:** toggle rendered inside `#ev-table-section`. Switching calls `switchEvTableScenario(scenario)` which calls `_refreshEvTable()` only.
 - `_cmpEvTableData` — compare-scenario expanded events; built in `renderResults` immediately after `_evTableData` using `resolveEventSets(cfg.compareEventSetIds)` + compare baseline's liab snapshots. No overrides applied (overrides are primary-only). Read by `renderEventsTableSection` when `_evTableScenario === 'compare'` and by `renderBalanceReviewContent` for the compare breakdown table.
 
-**Tab 1 — Overview:** summary stats, Net Worth chart, Cash Flow chart, optional scenario switcher, Monthly/Annual Detail table, Baseline Values Over Time table. When compare exists, the Detail table uses `ovDet`/`ovCmp`/`ovMc` locals (derived from `_overviewScenario`). Expandable detail rows are disabled when `_overviewScenario === 'compare'`. `updateBaselineValuesAt()` reads from `cmpResults` when `_overviewScenario === 'compare'`.
+**Tab 1 — Overview:** summary stats, Net Worth chart, Cash Flow chart, optional scenario switcher, Monthly/Annual Detail table. When compare exists, the Detail table uses `ovDet`/`ovCmp`/`ovMc` locals (derived from `_overviewScenario`). Expandable detail rows are disabled when `_overviewScenario === 'compare'`.
 
 **Tab 2 — Event Details:** the `#ev-table-section` div containing `renderEventsTableSection()`. When compare exists, a scenario toggle is rendered inside the section (so it is refreshed by `_refreshEvTable()`). Compare events are read-only — no Edit buttons. `exportEventsCSV()` exports the currently-selected scenario's data.
 
 **Tab 3 — Balance Review:** dropdown + balance chart (`chart-br`) + breakdown table(s). When compare exists: the chart shows both scenarios as separate lines; two breakdown tables are stacked with scenario headings. See § Balance Review Tab below.
+
+**Tab 4 — Baseline Values:** rendered by `renderBaselineValuesContent()` into `#baseline-values-section`. Shows per-account balances over the forecast horizon with an "At month:" dropdown to inspect values at any point in time. When no compare scenario: one card with section title "Baseline Values Over Time" using `run.detResults` + primary baseline. When compare exists: two stacked cards — base scenario first (titled with the baseline name), compare scenario second — each with its own independent "At month:" dropdown (`#bv-month-select` / `#bv-cmp-month-select`) and tbody (`#bv-tbody` / `#bv-cmp-tbody`). `updateBaselineValuesAt()` drives the base table; `updateBaselineCmpValuesAt()` drives the compare table. Columns: Name · Type · Start · At [month] · Change (total) · End.
 
 ### Expandable Detail Rows
 

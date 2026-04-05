@@ -167,7 +167,7 @@ The Results page is divided into three tabs:
 
 **Scenario selector (compare configs only):**
 
-When the analysis has a **Compare Scenario**, a toggle appears below the charts labelled **Tables showing: [Base] [Compare]**. Switch it to show the Monthly Detail and Baseline Values tables for either scenario. The charts always show both scenarios simultaneously and are not affected by this toggle.
+When the analysis has a **Compare Scenario**, a toggle appears below the charts labelled **Tables showing: [Base] [Compare]**. Switch it to show the Monthly Detail table for either scenario. The charts always show both scenarios simultaneously and are not affected by this toggle.
 
 **Detail table columns:**
 
@@ -200,10 +200,6 @@ Annual view rows are not expandable; switch to Monthly view to inspect or edit i
 The expanded sub-table shows **Name, Category, Type, Amount**, and an Edit button. Rows are sorted by type (Income → One-time In → Expense → Loan Payment → One-time Out), then by amount largest-to-smallest within each type.
 
 After editing, a warning banner appears at the top of the page indicating the results are out of date. Click **Re-run now** or the **Re-Run** button in the header to refresh.
-
-**Baseline Values Over Time table:**
-
-Below the detail table, a second table shows every asset, liability, and the accumulated cash flow with four columns: **Start**, **At Month** (interactive), **Change**, and **End**. Use the dropdown to pick any month in the forecast period — the "At Month" column updates instantly to show what each account balance or loan balance looks like at that point. Assets created by "Deposit into Asset" events that don't exist in the baseline are shown as **Asset (new)** rows starting from $0. When the **Compare Scenario** is selected via the toggle, this table reflects the compare baseline's assets and liabilities.
 
 ---
 
@@ -243,6 +239,14 @@ The chart uses the monthly engine results directly — no recalculation is neede
 
 ---
 
+#### Baseline Values tab
+
+Shows every asset, liability, and the accumulated cash flow with four columns: **Start**, **At Month** (interactive), **Change (total)**, and **End**. Use the "At month:" dropdown to pick any month in the forecast period — the "At Month" column updates instantly to show each account or loan balance at that point. Assets created by "Deposit into Asset" events that don't exist in the baseline are shown as **Asset (new)** rows starting from $0.
+
+**Compare scenario:** When the analysis has a Compare Scenario, two tables are stacked — one for each scenario, each with its own independent "At month:" dropdown.
+
+---
+
 ## How the Forecast Works
 
 Each month the engine:
@@ -267,7 +271,7 @@ Each month the engine:
 - For a paycheck deposited into a brokerage: use **Deposit into Asset** on an income event so the account balance tracks correctly.
 - For a bill paid from a specific account: use **Pay from Asset** on an expense event to track that account's balance declining over time.
 - For extra mortgage/loan payments: use **Extra Payment to Liability** on a one-time outflow to model accelerated payoff. Combine with **Pay from Asset** to show exactly which account it comes from.
-- Use the **Baseline Values Over Time** table in Results to see when specific assets or liabilities hit key milestones — pick any month with the dropdown.
+- Use the **Baseline Values** tab in Results to see when specific assets or liabilities hit key milestones — pick any month with the dropdown.
 - For variable income (bonuses, freelance): add a **Std Dev** to the event so Monte Carlo reflects the uncertainty.
 - Run Monte Carlo with **500+ simulations** for reliable percentile bands.
 - Use the **sustainability target line** to see when your portfolio could sustain your lifestyle indefinitely.

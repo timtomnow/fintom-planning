@@ -199,7 +199,7 @@ let _evTableData = []; // populated by renderResults
 const EV_PAGE_SIZE = 25;
 
 // Results page tab state
-let _resultsTab = 'overview'; // 'overview' | 'events' | 'balance-review'
+let _resultsTab = 'overview'; // 'overview' | 'events' | 'balance-review' | 'baseline-values'
 let _brSelectedItem = '';     // '' = accumulated cash flow; 'asset:Name' or 'liab:Name'
 let _brChart = null;          // Chart.js instance for balance review chart (managed separately)
 let _overviewScenario = 'base'; // 'base' | 'compare'; which scenario's tables to show in overview
@@ -412,7 +412,7 @@ function exportEventsCSV() {
 
 function switchResultsTab(tab) {
   _resultsTab = tab;
-  ['overview', 'events', 'balance-review'].forEach(t => {
+  ['overview', 'events', 'balance-review', 'baseline-values'].forEach(t => {
     const el = document.getElementById('results-tab-' + t);
     if (el) el.style.display = t === tab ? '' : 'none';
   });
@@ -704,6 +704,103 @@ function attachBalanceReviewChart() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// BASELINE VALUES TAB
+// ═══════════════════════════════════════════════════════════════
+
+function renderBaselineValuesContent() {
+  const cfg = state.lastRunConfig;
+  const run = state.lastRun;
+  if (!cfg || !run) return '<div class="empty-state-body">No results available.</div>';
+
+  const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
+  const cBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const hasCompare = !!(run.cmpResults && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
+
+  const buildTableCard = (baseline, results, selectId, tbodyId, headerAtId, title) => {
+    if (!baseline || !results?.length) return '';
+    const first = results[0];
+    const last  = results[results.length - 1];
+
+    const monthOptions = results.map(r =>
+      `<option value="${r.month}">${monthLabel(r.month)}</option>`
+    ).join('');
+
+    const baselineAssetNames = new Set((baseline.assets ?? []).map(a => a.name));
+    const virtualAssets = (first?.assetSnapshots ?? []).filter(s => !baselineAssetNames.has(s.name));
+
+    const rows = [
+      ...(baseline.assets ?? []).map(a => ({
+        type: 'asset', name: a.name, startVal: a.value,
+        endVal: last.assetSnapshots?.find(s => s.name === a.name)?.value ?? 0,
+        atVal:  first.assetSnapshots?.find(s => s.name === a.name)?.value ?? 0,
+      })),
+      ...virtualAssets.map(s => ({
+        type: 'asset-virtual', name: s.name, startVal: 0,
+        endVal: last.assetSnapshots?.find(snap => snap.name === s.name)?.value ?? 0,
+        atVal:  s.value,
+      })),
+      { type: 'cash', name: 'Cash Flow (accumulated)', startVal: 0,
+        endVal: last.cashFlow, atVal: first.cashFlow },
+      ...(baseline.liabilities ?? []).map(l => ({
+        type: 'liability', name: l.name, startVal: l.value,
+        endVal: last.liabSnapshots?.find(s => s.name === l.name)?.value ?? 0,
+        atVal:  first.liabSnapshots?.find(s => s.name === l.name)?.value ?? 0,
+      })),
+    ];
+
+    const tableRows = rows.map(item => {
+      const tLabel = item.type === 'asset' ? 'Asset'
+        : item.type === 'asset-virtual' ? 'Asset (new)'
+        : item.type === 'liability' ? 'Liability' : 'Cash';
+      const endChange = item.endVal - item.startVal;
+      return `<tr data-bv-type="${item.type}" data-bv-name="${esc(item.name)}">
+        <td>${esc(item.name)}</td>
+        <td class="text-muted">${tLabel}</td>
+        <td class="text-right font-mono">${fmt$(item.startVal)}</td>
+        <td class="text-right font-mono bv-at-val">${fmt$(item.atVal)}</td>
+        <td class="text-right font-mono ${item.type === 'liability' ? (endChange <= 0 ? 'text-positive' : 'text-negative') : (endChange >= 0 ? 'text-positive' : 'text-negative')}">${endChange >= 0 ? '+' : ''}${fmt$(endChange)}</td>
+        <td class="text-right font-mono">${fmt$(item.endVal)}</td>
+      </tr>`;
+    }).join('');
+
+    const onchange = selectId === 'bv-month-select' ? 'updateBaselineValuesAt()' : 'updateBaselineCmpValuesAt()';
+
+    return `<div class="card${hasCompare ? ' mb-4' : ''}">
+      <div class="section-header" style="margin-bottom:12px;">
+        <div class="section-title">${esc(title)}</div>
+        <div class="flex items-center gap-2">
+          <label style="font-size:13px;color:var(--text-muted);">At month:</label>
+          <select id="${selectId}" style="width:auto;" onchange="${onchange}">
+            ${monthOptions}
+          </select>
+        </div>
+      </div>
+      <div class="result-table-wrap">
+        <table>
+          <thead><tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th class="text-right">Start (${monthLabel(cfg.startDate)})</th>
+            <th class="text-right" id="${headerAtId}">At ${monthLabel(cfg.startDate)}</th>
+            <th class="text-right">Change (total)</th>
+            <th class="text-right">End (${monthLabel(cfg.endDate)})</th>
+          </tr></thead>
+          <tbody id="${tbodyId}">${tableRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  };
+
+  const baseTitle = hasCompare ? (pBl?.name ?? 'Base Scenario') : 'Baseline Values Over Time';
+  const cmpTitle  = cBl?.name ?? 'Compare Scenario';
+
+  return `
+    ${buildTableCard(pBl, run.detResults, 'bv-month-select', 'bv-tbody', 'bv-at-header', baseTitle)}
+    ${hasCompare && run.cmpResults ? buildTableCard(cBl ?? pBl, run.cmpResults, 'bv-cmp-month-select', 'bv-cmp-tbody', 'bv-cmp-at-header', cmpTitle) : ''}
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // RESULTS PAGE
 // ═══════════════════════════════════════════════════════════════
 
@@ -895,8 +992,6 @@ function renderResults() {
   const ovDet  = showCmpOverview ? (cmp ?? det) : det;
   const ovCmp  = showCmpOverview ? null : cmp;
   const ovMc   = showCmpOverview ? null : mc;
-  const ovBl   = showCmpOverview ? (cBl ?? pBl) : pBl;
-  const ovRes  = showCmpOverview ? run.cmpResults : run.detResults; // monthly results for BV table
   // Exclude synthetic loan_payment entries from event processing — they're handled by liabEntries
   const effectiveEvents = _evTableData.filter(e => e.type !== 'loan_payment');
   const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out', loan_payment: 'Loan Payment' }[t] ?? t);
@@ -1038,6 +1133,7 @@ function renderResults() {
       <button class="results-tab-btn${_resultsTab === 'overview' ? ' active' : ''}" data-tab="overview" onclick="switchResultsTab('overview')">Overview</button>
       <button class="results-tab-btn${_resultsTab === 'events' ? ' active' : ''}" data-tab="events" onclick="switchResultsTab('events')">Event Details</button>
       <button class="results-tab-btn${_resultsTab === 'balance-review' ? ' active' : ''}" data-tab="balance-review" onclick="switchResultsTab('balance-review')">Balance Review</button>
+      <button class="results-tab-btn${_resultsTab === 'baseline-values' ? ' active' : ''}" data-tab="baseline-values" onclick="switchResultsTab('baseline-values')">Baseline Values</button>
     </div>
 
     <!-- Tab 1: Overview -->
@@ -1176,80 +1272,6 @@ function renderResults() {
       </div>
     </div>
 
-    <!-- Baseline values over time -->
-    ${(() => {
-      const baseline = ovBl;
-      if (!baseline) return '';
-      const first = ovRes[0];
-      const last  = ovRes[ovRes.length - 1];
-
-      const monthOptions = ovRes.map(r =>
-        `<option value="${r.month}">${monthLabel(r.month)}</option>`
-      ).join('');
-
-      const baselineAssetNames = new Set((baseline.assets ?? []).map(a => a.name));
-      const virtualAssets = (first.assetSnapshots ?? []).filter(s => !baselineAssetNames.has(s.name));
-
-      const rows = [
-        ...(baseline.assets ?? []).map(a => ({
-          type: 'asset', name: a.name, startVal: a.value,
-          endVal: last.assetSnapshots?.find(s => s.name === a.name)?.value ?? 0,
-          atVal:  first.assetSnapshots?.find(s => s.name === a.name)?.value ?? 0,
-        })),
-        ...virtualAssets.map(s => ({
-          type: 'asset-virtual', name: s.name, startVal: 0,
-          endVal: last.assetSnapshots?.find(snap => snap.name === s.name)?.value ?? 0,
-          atVal:  s.value,
-        })),
-        { type: 'cash', name: 'Cash Flow (accumulated)', startVal: 0,
-          endVal: last.cashFlow, atVal: first.cashFlow },
-        ...(baseline.liabilities ?? []).map(l => ({
-          type: 'liability', name: l.name, startVal: l.value,
-          endVal: last.liabSnapshots?.find(s => s.name === l.name)?.value ?? 0,
-          atVal:  first.liabSnapshots?.find(s => s.name === l.name)?.value ?? 0,
-        })),
-      ];
-
-      const tableRows = rows.map(item => {
-        const typeLabel = item.type === 'asset' ? 'Asset'
-          : item.type === 'asset-virtual' ? 'Asset (new)'
-          : item.type === 'liability' ? 'Liability' : 'Cash';
-        const endChange = item.endVal - item.startVal;
-        return `<tr data-bv-type="${item.type}" data-bv-name="${esc(item.name)}">
-          <td>${esc(item.name)}</td>
-          <td class="text-muted">${typeLabel}</td>
-          <td class="text-right font-mono">${fmt$(item.startVal)}</td>
-          <td class="text-right font-mono bv-at-val">${fmt$(item.atVal)}</td>
-          <td class="text-right font-mono ${item.type === 'liability' ? (endChange <= 0 ? 'text-positive' : 'text-negative') : (endChange >= 0 ? 'text-positive' : 'text-negative')}">${endChange >= 0 ? '+' : ''}${fmt$(endChange)}</td>
-          <td class="text-right font-mono">${fmt$(item.endVal)}</td>
-        </tr>`;
-      }).join('');
-
-      return `<div class="card" style="margin-top:20px;">
-        <div class="section-header" style="margin-bottom:12px;">
-          <div class="section-title">Baseline Values Over Time</div>
-          <div class="flex items-center gap-2">
-            <label style="font-size:13px;color:var(--text-muted);">At month:</label>
-            <select id="bv-month-select" style="width:auto;" onchange="updateBaselineValuesAt()">
-              ${monthOptions}
-            </select>
-          </div>
-        </div>
-        <div class="result-table-wrap">
-          <table>
-            <thead><tr>
-              <th>Name</th>
-              <th>Type</th>
-              <th class="text-right">Start (${monthLabel(cfg.startDate)})</th>
-              <th class="text-right" id="bv-at-header">At ${monthLabel(cfg.startDate)}</th>
-              <th class="text-right">Change (total)</th>
-              <th class="text-right">End (${monthLabel(cfg.endDate)})</th>
-            </tr></thead>
-            <tbody id="bv-tbody">${tableRows}</tbody>
-          </table>
-        </div>
-      </div>`;
-    })()}
 
     </div> <!-- end results-tab-overview -->
 
@@ -1266,6 +1288,13 @@ function renderResults() {
         <div id="balance-review-section">
           ${_resultsTab === 'balance-review' ? renderBalanceReviewContent() : ''}
         </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Baseline Values -->
+    <div id="results-tab-baseline-values"${_resultsTab !== 'baseline-values' ? ' style="display:none"' : ''}>
+      <div id="baseline-values-section">
+        ${renderBaselineValuesContent()}
       </div>
     </div>
 
@@ -1455,16 +1484,40 @@ function updateBaselineValuesAt() {
   const sel = document.getElementById('bv-month-select');
   if (!sel || !state.lastRun) return;
   const month = sel.value;
-  const results = (_overviewScenario === 'compare' && state.lastRun.cmpResults)
-    ? state.lastRun.cmpResults
-    : state.lastRun.detResults;
-  const result = results.find(r => r.month === month);
+  const result = state.lastRun.detResults.find(r => r.month === month);
   if (!result) return;
 
   const header = document.getElementById('bv-at-header');
   if (header) header.textContent = `At ${monthLabel(month)}`;
 
   document.querySelectorAll('#bv-tbody tr').forEach(row => {
+    const type = row.dataset.bvType;
+    const name = row.dataset.bvName;
+    const cell = row.querySelector('.bv-at-val');
+    if (!cell) return;
+    let val;
+    if (type === 'asset' || type === 'asset-virtual') {
+      val = result.assetSnapshots?.find(s => s.name === name)?.value ?? 0;
+    } else if (type === 'cash') {
+      val = result.cashFlow;
+    } else {
+      val = result.liabSnapshots?.find(s => s.name === name)?.value ?? 0;
+    }
+    cell.textContent = fmt$(val);
+  });
+}
+
+function updateBaselineCmpValuesAt() {
+  const sel = document.getElementById('bv-cmp-month-select');
+  if (!sel || !state.lastRun?.cmpResults) return;
+  const month = sel.value;
+  const result = state.lastRun.cmpResults.find(r => r.month === month);
+  if (!result) return;
+
+  const header = document.getElementById('bv-cmp-at-header');
+  if (header) header.textContent = `At ${monthLabel(month)}`;
+
+  document.querySelectorAll('#bv-cmp-tbody tr').forEach(row => {
     const type = row.dataset.bvType;
     const name = row.dataset.bvName;
     const cell = row.querySelector('.bv-at-val');
