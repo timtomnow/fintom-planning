@@ -202,17 +202,26 @@ const EV_PAGE_SIZE = 25;
 let _resultsTab = 'overview'; // 'overview' | 'events' | 'balance-review'
 let _brSelectedItem = '';     // '' = accumulated cash flow; 'asset:Name' or 'liab:Name'
 let _brChart = null;          // Chart.js instance for balance review chart (managed separately)
+let _overviewScenario = 'base'; // 'base' | 'compare'; which scenario's tables to show in overview
+let _evTableScenario  = 'base'; // 'base' | 'compare'; which scenario to show in event details
+let _cmpEvTableData   = [];     // compare-scenario expanded events; populated by renderResults
 
 function renderEventsTableSection() {
   const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out', loan_payment: 'Loan Payment' }[t] ?? t);
   const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time', loan_payment: 'neutral' }[t] ?? '');
 
   const cfg = state.lastRunConfig;
+  const run = state.lastRun;
+  const pBl = cfg ? state.data.baselines.find(b => b.id === cfg.baselineId) : null;
+  const cBl = cfg ? state.data.baselines.find(b => b.id === cfg.compareBaselineId) : null;
+  const hasCompare = !!(run?.cmpResults && cfg && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
+  const showCmp = hasCompare && _evTableScenario === 'compare';
+  const tableData = showCmp ? _cmpEvTableData : _evTableData;
 
-  const allCats  = [...new Set(_evTableData.map(e => e.category))].sort();
-  const allTypes = [...new Set(_evTableData.map(e => e.type))].sort();
+  const allCats  = [...new Set(tableData.map(e => e.category))].sort();
+  const allTypes = [...new Set(tableData.map(e => e.type))].sort();
 
-  const filtered = _evTableData.filter(e => {
+  const filtered = tableData.filter(e => {
     if (_evTableNameFilter && !e.name.toLowerCase().includes(_evTableNameFilter.toLowerCase())) return false;
     if (_evTableCatFilter.size  && !_evTableCatFilter.has(e.category))  return false;
     if (_evTableTypeFilter.size && !_evTableTypeFilter.has(e.type))     return false;
@@ -237,14 +246,16 @@ function renderEventsTableSection() {
   const typeDD = allTypes.map(t => `<label class="ev-filter-item"><input type="checkbox" ${_evTableTypeFilter.has(t) ? 'checked' : ''} onchange="evTableFilter('type','${esc(t)}',this.checked)"> ${typeLabel(t)}</label>`).join('');
 
   const rows = pageData.map(e => {
-    const editAction = `openOverrideEventModal('${esc(cfg?.id ?? '')}','${esc(e.id)}','${esc(e.startDate)}')`;
+    const editCell = showCmp
+      ? '<td></td>'
+      : `<td><button class="btn btn-sm btn-ghost" onclick="openOverrideEventModal('${esc(cfg?.id ?? '')}','${esc(e.id)}','${esc(e.startDate)}')">Edit</button></td>`;
     return `<tr>
       <td class="nowrap" style="font-size:12px;">${monthLabel(e.startDate)}</td>
       <td><strong>${esc(e.name)}</strong></td>
       <td class="text-muted">${esc(e.category)}</td>
       <td><span class="badge ${badgeClass(e.type)}">${typeLabel(e.type)}</span></td>
       <td class="text-right font-mono">${fmt$(e.amount)}</td>
-      <td><button class="btn btn-sm btn-ghost" onclick="${editAction}">Edit</button></td>
+      ${editCell}
     </tr>`;
   }).join('');
 
@@ -256,8 +267,15 @@ function renderEventsTableSection() {
     </div>` : `<div class="text-muted mt-2" style="font-size:13px;">${sorted.length} event${sorted.length !== 1 ? 's' : ''}</div>`;
 
   return `
+    ${hasCompare ? `<div class="flex items-center gap-2 mb-4" style="padding-bottom:12px;border-bottom:1px solid var(--border);">
+      <span style="font-size:13px;color:var(--text-muted);">Scenario:</span>
+      <div class="toggle-group">
+        <button class="toggle-btn${!showCmp ? ' active' : ''}" onclick="switchEvTableScenario('base')">${esc(pBl?.name ?? 'Base Scenario')}</button>
+        <button class="toggle-btn${showCmp ? ' active' : ''}" onclick="switchEvTableScenario('compare')">${esc(cBl?.name ?? 'Compare Scenario')}</button>
+      </div>
+    </div>` : ''}
     <div class="section-header" style="margin-bottom:12px;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-      <div class="section-title">All Analysis Events</div>
+      <div class="section-title">All Analysis Events${showCmp ? ` — ${esc(cBl?.name ?? 'Compare Scenario')}` : ''}</div>
       <div class="flex gap-2 flex-wrap items-center">
         <div style="display:flex;align-items:center;gap:0;">
           <input type="search" id="ev-name-input" placeholder="Search name…" value="${esc(_evTableNameInput)}"
@@ -345,10 +363,24 @@ function _refreshEvTable() {
   if (wrap) wrap.innerHTML = renderEventsTableSection();
 }
 
+function switchOverviewScenario(scenario) {
+  _overviewScenario = scenario;
+  navigate('results', state.params);
+}
+
+function switchEvTableScenario(scenario) {
+  _evTableScenario = scenario;
+  _evTablePage = 0;
+  _refreshEvTable();
+}
+
 function exportEventsCSV() {
   const cfg = state.lastRunConfig;
   const taxRate = cfg?.taxRate ?? 0;
-  const bl = cfg ? state.data.baselines.find(b => b.id === cfg.baselineId) : null;
+  const showCmp = _evTableScenario === 'compare' && _cmpEvTableData.length > 0;
+  const exportData = showCmp ? _cmpEvTableData : _evTableData;
+  const blId = showCmp ? (cfg?.compareBaselineId || cfg?.baselineId) : cfg?.baselineId;
+  const bl = cfg ? state.data.baselines.find(b => b.id === blId) : null;
   const calcRowCF = (e) => {
     if (e.type === 'loan_payment') {
       const liab = bl?.liabilities?.find(l => l.id === e._liabId);
@@ -363,7 +395,7 @@ function exportEventsCSV() {
     return -e.amount;
   };
   const rows = [['Name','Category','Type','Amount','CashFlow','Month']];
-  for (const e of _evTableData) {
+  for (const e of exportData) {
     rows.push([e.name, e.category, e.type, e.amount, calcRowCF(e), e.startDate]);
   }
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -418,10 +450,12 @@ function renderBalanceReviewContent() {
   if (!cfg || !run) return '<div class="empty-state-body">No results available.</div>';
 
   const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
+  const cBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const hasCompare = !!(run.cmpResults && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
   const detResults = run.detResults; // always monthly
   const taxRate = cfg.taxRate ?? 0;
 
-  // Build item list for dropdown
+  // Build item list for dropdown (always from primary baseline)
   const baseAssetNames = new Set((pBl?.assets ?? []).map(a => a.name));
   const firstResult = detResults[0];
   const virtualAssets = (firstResult?.assetSnapshots ?? []).filter(s => !baseAssetNames.has(s.name));
@@ -440,15 +474,14 @@ function renderBalanceReviewContent() {
   const itemType = selectedItem.type;
   const itemName = selectedKey.includes(':') ? selectedKey.split(':').slice(1).join(':') : '';
 
-  // ── Compute rows ──
-  const rows = detResults.map((r, i) => {
-    const prev = i > 0 ? detResults[i - 1] : null;
+  // ── Compute rows for a given scenario's results, baseline, and event data ──
+  const buildRows = (results, blObj, evData) => results.map((r, i) => {
+    const prev = i > 0 ? results[i - 1] : null;
 
     if (itemType === 'cash') {
       const startBal = prev?.cashFlow ?? 0;
       const endBal = r.cashFlow;
-      // Compute inflows and outflows that route through cashFlow this month
-      const monthEvts = _evTableData.filter(e => e.startDate === r.month);
+      const monthEvts = evData.filter(e => e.startDate === r.month);
       let inflow = 0, outflow = 0;
       for (const e of monthEvts) {
         if ((e.type === 'income' || e.type === 'one_time_inflow') && !e.depositToAssetName) {
@@ -459,7 +492,7 @@ function renderBalanceReviewContent() {
           outflow += e.amount;
         }
         if (e.type === 'loan_payment') {
-          const liab = pBl?.liabilities?.find(l => l.id === e._liabId);
+          const liab = blObj?.liabilities?.find(l => l.id === e._liabId);
           if (!liab?.paymentAssetName) outflow += e.amount;
         }
       }
@@ -468,10 +501,9 @@ function renderBalanceReviewContent() {
     } else if (itemType === 'asset') {
       const startBal = prev
         ? (prev.assetSnapshots?.find(s => s.name === itemName)?.value ?? 0)
-        : (pBl?.assets?.find(a => a.name === itemName)?.value ?? 0);
+        : (blObj?.assets?.find(a => a.name === itemName)?.value ?? 0);
       const endBal = r.assetSnapshots?.find(s => s.name === itemName)?.value ?? 0;
-      // Events that directly affect this asset's value
-      const monthEvts = _evTableData.filter(e => e.startDate === r.month);
+      const monthEvts = evData.filter(e => e.startDate === r.month);
       let eventsImpact = 0;
       for (const e of monthEvts) {
         if ((e.type === 'income' || e.type === 'one_time_inflow') && e.depositToAssetName === itemName) {
@@ -484,7 +516,7 @@ function renderBalanceReviewContent() {
           eventsImpact += e.amount;
         }
         if (e.type === 'loan_payment') {
-          const liab = pBl?.liabilities?.find(l => l.id === e._liabId);
+          const liab = blObj?.liabilities?.find(l => l.id === e._liabId);
           if (liab?.paymentAssetName === itemName) eventsImpact -= e.amount;
         }
       }
@@ -492,8 +524,7 @@ function renderBalanceReviewContent() {
       return { month: r.month, startBal, growthLoss, eventsImpact, change: endBal - startBal, endBal };
 
     } else {
-      // liability
-      const liab = pBl?.liabilities?.find(l => l.name === itemName);
+      const liab = blObj?.liabilities?.find(l => l.name === itemName);
       const startBal = prev
         ? (prev.liabSnapshots?.find(s => s.name === itemName)?.value ?? 0)
         : (liab?.value ?? 0);
@@ -506,62 +537,71 @@ function renderBalanceReviewContent() {
     }
   });
 
-  // ── Build table columns based on item type ──
-  let thead, dataRows;
-  if (itemType === 'cash') {
-    thead = `<tr>
-      <th>Month</th>
-      <th class="text-right">Starting Balance</th>
-      <th class="text-right">+ Inflows</th>
-      <th class="text-right">− Outflows</th>
-      <th class="text-right">Net Change</th>
-      <th class="text-right">Ending Balance</th>
-    </tr>`;
-    dataRows = rows.map(row => `<tr>
-      <td class="nowrap" style="font-size:12px;">${monthLabel(row.month)}</td>
-      <td class="text-right font-mono">${fmt$(row.startBal)}</td>
-      <td class="text-right font-mono text-positive">${row.inflow > 0 ? fmt$(row.inflow) : '—'}</td>
-      <td class="text-right font-mono text-negative">${row.outflow > 0 ? fmt$(row.outflow) : '—'}</td>
-      <td class="text-right font-mono ${row.change >= 0 ? 'text-positive' : 'text-negative'}">${row.change >= 0 ? '+' : ''}${fmt$(row.change)}</td>
-      <td class="text-right font-mono ${row.endBal >= 0 ? '' : 'text-negative'}">${fmt$(row.endBal)}</td>
-    </tr>`).join('');
+  // ── Build table HTML for a rows array ──
+  const buildTableHtml = (rows) => {
+    let thead, dataRows;
+    if (itemType === 'cash') {
+      thead = `<tr>
+        <th>Month</th>
+        <th class="text-right">Starting Balance</th>
+        <th class="text-right">+ Inflows</th>
+        <th class="text-right">− Outflows</th>
+        <th class="text-right">Net Change</th>
+        <th class="text-right">Ending Balance</th>
+      </tr>`;
+      dataRows = rows.map(row => `<tr>
+        <td class="nowrap" style="font-size:12px;">${monthLabel(row.month)}</td>
+        <td class="text-right font-mono">${fmt$(row.startBal)}</td>
+        <td class="text-right font-mono text-positive">${row.inflow > 0 ? fmt$(row.inflow) : '—'}</td>
+        <td class="text-right font-mono text-negative">${row.outflow > 0 ? fmt$(row.outflow) : '—'}</td>
+        <td class="text-right font-mono ${row.change >= 0 ? 'text-positive' : 'text-negative'}">${row.change >= 0 ? '+' : ''}${fmt$(row.change)}</td>
+        <td class="text-right font-mono ${row.endBal >= 0 ? '' : 'text-negative'}">${fmt$(row.endBal)}</td>
+      </tr>`).join('');
+    } else if (itemType === 'asset') {
+      thead = `<tr>
+        <th>Month</th>
+        <th class="text-right">Starting Balance</th>
+        <th class="text-right">Growth / Loss</th>
+        <th class="text-right">Events</th>
+        <th class="text-right">Net Change</th>
+        <th class="text-right">Ending Balance</th>
+      </tr>`;
+      dataRows = rows.map(row => `<tr>
+        <td class="nowrap" style="font-size:12px;">${monthLabel(row.month)}</td>
+        <td class="text-right font-mono">${fmt$(row.startBal)}</td>
+        <td class="text-right font-mono ${row.growthLoss >= 0 ? 'text-positive' : 'text-negative'}">${row.growthLoss !== 0 ? (row.growthLoss >= 0 ? '+' : '') + fmt$(row.growthLoss) : '—'}</td>
+        <td class="text-right font-mono ${row.eventsImpact >= 0 ? 'text-positive' : 'text-negative'}">${row.eventsImpact !== 0 ? (row.eventsImpact >= 0 ? '+' : '') + fmt$(row.eventsImpact) : '—'}</td>
+        <td class="text-right font-mono ${row.change >= 0 ? 'text-positive' : 'text-negative'}">${row.change >= 0 ? '+' : ''}${fmt$(row.change)}</td>
+        <td class="text-right font-mono">${fmt$(row.endBal)}</td>
+      </tr>`).join('');
+    } else {
+      thead = `<tr>
+        <th>Month</th>
+        <th class="text-right">Starting Balance</th>
+        <th class="text-right">Interest</th>
+        <th class="text-right">Principal Paid</th>
+        <th class="text-right">Net Change</th>
+        <th class="text-right">Ending Balance</th>
+      </tr>`;
+      dataRows = rows.map(row => `<tr>
+        <td class="nowrap" style="font-size:12px;">${monthLabel(row.month)}</td>
+        <td class="text-right font-mono">${fmt$(row.startBal)}</td>
+        <td class="text-right font-mono text-negative">${row.interest > 0 ? fmt$(row.interest) : '—'}</td>
+        <td class="text-right font-mono text-positive">${row.principalPaid > 0 ? fmt$(row.principalPaid) : '—'}</td>
+        <td class="text-right font-mono ${row.change <= 0 ? 'text-positive' : 'text-negative'}">${row.change !== 0 ? (row.change >= 0 ? '+' : '') + fmt$(row.change) : '—'}</td>
+        <td class="text-right font-mono">${fmt$(row.endBal)}</td>
+      </tr>`).join('');
+    }
+    return `<div class="result-table-wrap">
+      <table>
+        <thead>${thead}</thead>
+        <tbody>${dataRows}</tbody>
+      </table>
+    </div>`;
+  };
 
-  } else if (itemType === 'asset') {
-    thead = `<tr>
-      <th>Month</th>
-      <th class="text-right">Starting Balance</th>
-      <th class="text-right">Growth / Loss</th>
-      <th class="text-right">Events</th>
-      <th class="text-right">Net Change</th>
-      <th class="text-right">Ending Balance</th>
-    </tr>`;
-    dataRows = rows.map(row => `<tr>
-      <td class="nowrap" style="font-size:12px;">${monthLabel(row.month)}</td>
-      <td class="text-right font-mono">${fmt$(row.startBal)}</td>
-      <td class="text-right font-mono ${row.growthLoss >= 0 ? 'text-positive' : 'text-negative'}">${row.growthLoss !== 0 ? (row.growthLoss >= 0 ? '+' : '') + fmt$(row.growthLoss) : '—'}</td>
-      <td class="text-right font-mono ${row.eventsImpact >= 0 ? 'text-positive' : 'text-negative'}">${row.eventsImpact !== 0 ? (row.eventsImpact >= 0 ? '+' : '') + fmt$(row.eventsImpact) : '—'}</td>
-      <td class="text-right font-mono ${row.change >= 0 ? 'text-positive' : 'text-negative'}">${row.change >= 0 ? '+' : ''}${fmt$(row.change)}</td>
-      <td class="text-right font-mono">${fmt$(row.endBal)}</td>
-    </tr>`).join('');
-
-  } else {
-    thead = `<tr>
-      <th>Month</th>
-      <th class="text-right">Starting Balance</th>
-      <th class="text-right">Interest</th>
-      <th class="text-right">Principal Paid</th>
-      <th class="text-right">Net Change</th>
-      <th class="text-right">Ending Balance</th>
-    </tr>`;
-    dataRows = rows.map(row => `<tr>
-      <td class="nowrap" style="font-size:12px;">${monthLabel(row.month)}</td>
-      <td class="text-right font-mono">${fmt$(row.startBal)}</td>
-      <td class="text-right font-mono text-negative">${row.interest > 0 ? fmt$(row.interest) : '—'}</td>
-      <td class="text-right font-mono text-positive">${row.principalPaid > 0 ? fmt$(row.principalPaid) : '—'}</td>
-      <td class="text-right font-mono ${row.change <= 0 ? 'text-positive' : 'text-negative'}">${row.change !== 0 ? (row.change >= 0 ? '+' : '') + fmt$(row.change) : '—'}</td>
-      <td class="text-right font-mono">${fmt$(row.endBal)}</td>
-    </tr>`).join('');
-  }
+  const baseRows = buildRows(detResults, pBl, _evTableData);
+  const cmpRows  = hasCompare ? buildRows(run.cmpResults, cBl ?? pBl, _cmpEvTableData) : null;
 
   const dropdownOpts = items.map(item =>
     `<option value="${esc(item.key)}"${item.key === selectedKey ? ' selected' : ''}>${esc(item.label)}</option>`
@@ -573,12 +613,13 @@ function renderBalanceReviewContent() {
       <select style="min-width:220px;" onchange="onBrItemChange(this.value)">${dropdownOpts}</select>
     </div>
     <div class="chart-container" style="height:240px;margin-bottom:20px;"><canvas id="chart-br"></canvas></div>
-    <div class="result-table-wrap">
-      <table>
-        <thead>${thead}</thead>
-        <tbody>${dataRows}</tbody>
-      </table>
-    </div>`;
+    ${hasCompare ? `<div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;">${esc(pBl?.name ?? 'Base Scenario')}</div>` : ''}
+    ${buildTableHtml(baseRows)}
+    ${cmpRows ? `
+    <div style="margin-top:28px;">
+      <div style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;">${esc(cBl?.name ?? 'Compare Scenario')}</div>
+      ${buildTableHtml(cmpRows)}
+    </div>` : ''}`;
 }
 
 function attachBalanceReviewChart() {
@@ -595,48 +636,61 @@ function attachBalanceReviewChart() {
   const run = state.lastRun;
   if (!cfg || !run) return;
 
+  const pBl = state.data.baselines.find(b => b.id === cfg.baselineId);
+  const cBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId);
+  const hasCompare = !!(run.cmpResults && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
+
   const detResults = run.detResults;
   const selectedKey = _brSelectedItem;
   const itemName = selectedKey.includes(':') ? selectedKey.split(':').slice(1).join(':') : '';
   const isLiab = selectedKey.startsWith('liab:');
   const isAsset = selectedKey.startsWith('asset:');
 
-  const labels = detResults.map(r => monthLabel(r.month));
-  let data, seriesLabel;
-  if (!selectedKey) {
-    data = detResults.map(r => r.cashFlow);
-    seriesLabel = 'Accumulated Cash Flow';
-  } else if (isAsset) {
-    data = detResults.map(r => r.assetSnapshots?.find(s => s.name === itemName)?.value ?? 0);
-    seriesLabel = itemName;
-  } else {
-    data = detResults.map(r => r.liabSnapshots?.find(s => s.name === itemName)?.value ?? 0);
-    seriesLabel = itemName;
-  }
+  const getSeriesData = (results) => {
+    if (!selectedKey) return results.map(r => r.cashFlow);
+    if (isAsset) return results.map(r => r.assetSnapshots?.find(s => s.name === itemName)?.value ?? 0);
+    return results.map(r => r.liabSnapshots?.find(s => s.name === itemName)?.value ?? 0);
+  };
 
-  const color = isLiab ? '#dc2626' : '#2563eb';
+  const seriesLabel = !selectedKey ? 'Accumulated Cash Flow' : itemName;
+  const color   = isLiab ? '#dc2626' : '#2563eb';
   const bgColor = isLiab ? 'rgba(220,38,38,0.07)' : 'rgba(37,99,235,0.07)';
+  const labels  = detResults.map(r => monthLabel(r.month));
+
+  const datasets = [{
+    label: hasCompare ? (pBl?.name ?? 'Base Scenario') : seriesLabel,
+    data: getSeriesData(detResults),
+    borderColor: color,
+    borderWidth: 2.5,
+    backgroundColor: hasCompare ? 'transparent' : bgColor,
+    fill: hasCompare ? false : 'origin',
+    tension: 0.3,
+  }];
+
+  if (hasCompare && run.cmpResults) {
+    datasets.push({
+      label: cBl?.name ?? 'Compare Scenario',
+      data: getSeriesData(run.cmpResults),
+      borderColor: '#16a34a',
+      borderWidth: 2.5,
+      backgroundColor: 'transparent',
+      fill: false,
+      tension: 0.3,
+    });
+  }
 
   _brChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: seriesLabel,
-        data,
-        borderColor: color,
-        borderWidth: 2.5,
-        backgroundColor: bgColor,
-        fill: 'origin',
-        tension: 0.3,
-      }],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: false },
+        legend: {
+          display: hasCompare,
+          labels: { boxWidth: 12, padding: 14, font: { size: 12 } },
+        },
         tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt$(ctx.raw)}` } },
       },
       elements: { point: { radius: 0, hoverRadius: 4 } },
@@ -760,7 +814,89 @@ function renderResults() {
   }
   _evTablePage = 0;
 
+  // Build compare-scenario event table data (mirrors _evTableData for compare events/baseline).
+  // No overrides applied — eventOverrides are scoped to the primary scenario only.
+  _cmpEvTableData = [];
+  if (run.cmpResults) {
+    const cmpBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId) ?? pBl;
+    const cmpBaseEvents = resolveEventSets(cfg.compareEventSetIds);
+    for (const ev of cmpBaseEvents) {
+      if (ev._sourceId) {
+        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _cmpEvTableData.push(ev);
+        continue;
+      }
+      const isOneTime = !ev.isRecurring || ev.type === 'one_time_inflow' || ev.type === 'one_time_outflow';
+      if (isOneTime) {
+        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _cmpEvTableData.push(ev);
+      } else {
+        const startM = ev.startDate > cfg.startDate ? ev.startDate : cfg.startDate;
+        const endM   = ev.endDate ? (ev.endDate < cfg.endDate ? ev.endDate : cfg.endDate) : cfg.endDate;
+        let month = startM;
+        while (month <= endM) {
+          const inflMult = (ev.inflationAdjusted && cfg.inflationRate)
+            ? Math.pow(1 + cfg.inflationRate / 12 / 100, monthsBetween(cfg.startDate, month))
+            : 1;
+          _cmpEvTableData.push({
+            ...ev,
+            id: `monthly-${ev.id}-${month}`,
+            _sourceId: ev.id,
+            _month: month,
+            startDate: month,
+            isRecurring: false,
+            inflationAdjusted: false,
+            amount: ev.amount * inflMult,
+          });
+          month = addMonths(month, 1);
+        }
+      }
+    }
+    // Append synthetic loan-payment entries from cmpResults
+    const cmpUserEvents = _cmpEvTableData.slice();
+    for (const l of (cmpBl?.liabilities ?? [])) {
+      if (!l.useAmortization) continue;
+      for (let i = 0; i < run.cmpResults.length; i++) {
+        const currResult = run.cmpResults[i];
+        const prevResult = i > 0 ? run.cmpResults[i - 1] : null;
+        const month = currResult.month;
+        const currBalance = currResult.liabSnapshots?.find(s => s.id === l.id)?.value ?? 0;
+        const prevBalance = prevResult
+          ? (prevResult.liabSnapshots?.find(s => s.id === l.id)?.value ?? l.value)
+          : l.value;
+        if (prevBalance <= 0) continue;
+        const effectiveRate = (l.termEndDate && month > l.termEndDate && (l.renewalRate ?? 0) > 0)
+          ? l.renewalRate : (l.annualInterestRate ?? 0);
+        const interest = prevBalance * effectiveRate / 12 / 100;
+        const extraPrincipal = cmpUserEvents
+          .filter(ev => ev.linkedLiabilityName === l.name && isEventActive(ev, month))
+          .reduce((s, ev) => s + (ev.amount ?? 0), 0);
+        const payment = Math.max(0, (prevBalance - currBalance - extraPrincipal) + interest);
+        if (payment <= 0) continue;
+        _cmpEvTableData.push({
+          id: `liab-payment-${l.id}-${month}`,
+          name: l.name,
+          category: l.category ?? 'Liability',
+          type: 'loan_payment',
+          amount: payment,
+          startDate: month,
+          isRecurring: false,
+          inflationAdjusted: false,
+          _liabId: l.id,
+        });
+      }
+    }
+  }
+
+  const hasCompare = !!(run.cmpResults && (cfg.compareBaselineId || cfg.compareEventSetIds?.length));
+  // numCols is only used for colspan in expandable monthly rows (base scenario only)
   const numCols = 12 + (cmp ? 1 : 0) + (mc ? 3 : 0);
+
+  // Overview table scenario: when showing compare, use cmp data; disable extra columns + expandable rows
+  const showCmpOverview = hasCompare && _overviewScenario === 'compare';
+  const ovDet  = showCmpOverview ? (cmp ?? det) : det;
+  const ovCmp  = showCmpOverview ? null : cmp;
+  const ovMc   = showCmpOverview ? null : mc;
+  const ovBl   = showCmpOverview ? (cBl ?? pBl) : pBl;
+  const ovRes  = showCmpOverview ? run.cmpResults : run.detResults; // monthly results for BV table
   // Exclude synthetic loan_payment entries from event processing — they're handled by liabEntries
   const effectiveEvents = _evTableData.filter(e => e.type !== 'loan_payment');
   const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out', loan_payment: 'Loan Payment' }[t] ?? t);
@@ -964,6 +1100,15 @@ function renderResults() {
       <div class="chart-note">Accumulated net cash from all events (income after tax minus expenses and loan payments). Excludes asset appreciation.</div>
     </div>
 
+    <!-- Scenario switcher for tables (only when compare scenario exists) -->
+    ${hasCompare ? `<div class="flex items-center gap-2 mb-4">
+      <span style="font-size:13px;color:var(--text-muted);">Tables showing:</span>
+      <div class="toggle-group">
+        <button class="toggle-btn${!showCmpOverview ? ' active' : ''}" onclick="switchOverviewScenario('base')">${esc(pBl?.name ?? 'Base Scenario')}</button>
+        <button class="toggle-btn${showCmpOverview ? ' active' : ''}" onclick="switchOverviewScenario('compare')">${esc(cBl?.name ?? 'Compare Scenario')}</button>
+      </div>
+    </div>` : ''}
+
     <!-- Data table -->
     <div class="card">
       <div class="section-header" style="margin-bottom:12px;">
@@ -984,20 +1129,21 @@ function renderResults() {
             <th class="text-right">Liquid NW</th>
             <th class="text-right">Assets</th>
             <th class="text-right">Liabilities</th>
-            ${cmp ? '<th class="text-right">Compare NW</th>' : ''}
-            ${mc  ? '<th class="text-right">P10</th><th class="text-right">P50</th><th class="text-right">P90</th>' : ''}
+            ${ovCmp ? '<th class="text-right">Compare NW</th>' : ''}
+            ${ovMc  ? '<th class="text-right">P10</th><th class="text-right">P50</th><th class="text-right">P90</th>' : ''}
           </tr></thead>
           <tbody>
-            ${det.reduce((acc, r, i) => {
+            ${ovDet.reduce((acc, r, i) => {
               const delta    = r.netWorth - (r.startNetWorth ?? r.netWorth);
               const transfer = r.transferThisMonth ?? 0;
               const cf       = (r.incomeThisMonth ?? 0) - (r.expenseThisMonth ?? 0);
               const cumCF    = acc.cumCF + cf;
               acc.cumCF = cumCF;
               const key = r.month; // 'YYYY-MM' or 'YYYY'
-              acc.html += `<tr class="result-row"${vm === 'monthly' ? ` style="cursor:pointer;" onclick="toggleEventDetail('${key}')"` : ''}>
+              const expandable = vm === 'monthly' && !showCmpOverview;
+              acc.html += `<tr class="result-row"${expandable ? ` style="cursor:pointer;" onclick="toggleEventDetail('${key}')"` : ''}>
               <td class="nowrap">
-                ${vm === 'monthly' ? `<span id="chev-${key}" style="display:inline-block;width:14px;font-size:9px;color:var(--text-muted);vertical-align:middle;">▶</span>` : ''}
+                ${expandable ? `<span id="chev-${key}" style="display:inline-block;width:14px;font-size:9px;color:var(--text-muted);vertical-align:middle;">▶</span>` : ''}
                 ${vm === 'yearly' ? r.month : monthLabel(r.month)}
               </td>
               <td class="text-right font-mono text-muted">${fmt$(r.startNetWorth ?? 0)}</td>
@@ -1011,14 +1157,14 @@ function renderResults() {
               <td class="text-right font-mono">${fmt$(r.liquidNetWorth)}</td>
               <td class="text-right font-mono">${fmt$(r.assetTotal)}</td>
               <td class="text-right font-mono text-negative">${fmt$(r.liabTotal)}</td>
-              ${cmp ? `<td class="text-right font-mono">${fmt$(cmp[i]?.netWorth)}</td>` : ''}
-              ${mc  ? `
-                <td class="text-right font-mono text-muted">${fmt$(mc[i]?.p10)}</td>
-                <td class="text-right font-mono">${fmt$(mc[i]?.p50)}</td>
-                <td class="text-right font-mono">${fmt$(mc[i]?.p90)}</td>
+              ${ovCmp ? `<td class="text-right font-mono">${fmt$(ovCmp[i]?.netWorth)}</td>` : ''}
+              ${ovMc  ? `
+                <td class="text-right font-mono text-muted">${fmt$(ovMc[i]?.p10)}</td>
+                <td class="text-right font-mono">${fmt$(ovMc[i]?.p50)}</td>
+                <td class="text-right font-mono">${fmt$(ovMc[i]?.p90)}</td>
               ` : ''}
             </tr>
-            ${vm === 'monthly' ? `<tr id="evd-${key}" style="display:none;">
+            ${expandable ? `<tr id="evd-${key}" style="display:none;">
               <td colspan="${numCols}" style="padding:0;background:var(--bg,#f8f9fb);border-bottom:1px solid var(--border);">
                 ${renderPeriodEvents(key)}
               </td>
@@ -1032,12 +1178,12 @@ function renderResults() {
 
     <!-- Baseline values over time -->
     ${(() => {
-      const baseline = pBl;
+      const baseline = ovBl;
       if (!baseline) return '';
-      const first = run.detResults[0];
-      const last  = run.detResults[run.detResults.length - 1];
+      const first = ovRes[0];
+      const last  = ovRes[ovRes.length - 1];
 
-      const monthOptions = run.detResults.map(r =>
+      const monthOptions = ovRes.map(r =>
         `<option value="${r.month}">${monthLabel(r.month)}</option>`
       ).join('');
 
@@ -1309,7 +1455,10 @@ function updateBaselineValuesAt() {
   const sel = document.getElementById('bv-month-select');
   if (!sel || !state.lastRun) return;
   const month = sel.value;
-  const result = state.lastRun.detResults.find(r => r.month === month);
+  const results = (_overviewScenario === 'compare' && state.lastRun.cmpResults)
+    ? state.lastRun.cmpResults
+    : state.lastRun.detResults;
+  const result = results.find(r => r.month === month);
   if (!result) return;
 
   const header = document.getElementById('bv-at-header');

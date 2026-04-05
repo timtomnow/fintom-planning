@@ -165,6 +165,10 @@ The Results page is divided into three tabs:
 - **Net Worth Over Time** — single line (deterministic), or percentile bands (Monte Carlo). Compare baseline shown in green. Sustainability target shown in orange.
 - **Cumulative Cash Flow** — running sum of Income minus Expenses (transfers excluded) since the forecast start
 
+**Scenario selector (compare configs only):**
+
+When the analysis has a **Compare Scenario**, a toggle appears below the charts labelled **Tables showing: [Base] [Compare]**. Switch it to show the Monthly Detail and Baseline Values tables for either scenario. The charts always show both scenarios simultaneously and are not affected by this toggle.
+
 **Detail table columns:**
 
 | Column | Description |
@@ -183,7 +187,7 @@ The Results page is divided into three tabs:
 
 > **Note on Δ NW vs Cash Flow:** Cash Flow ≠ Δ NW. The difference is asset appreciation (investment growth, property appreciation) which increases net worth without appearing in the cash flow columns.
 
-**Expandable period rows (Monthly view only):**
+**Expandable period rows (Monthly view only, base scenario):**
 
 In **Monthly view**, each row has a chevron and is clickable. Click a row to expand it and see which events and loan payments were active in that month, along with their amounts and cash-flow impact (+income, −expense, 0 for transfers). Amortizing liabilities appear as **Loan Payment** rows (shown in grey) with their computed payment for the month. Extra principal payment events appear as separate rows and are not merged into the Loan Payment row.
 
@@ -191,7 +195,7 @@ In **Monthly view**, each row has a chevron and is clickable. Click a row to exp
 - Clicking Edit on a Loan Payment row opens a pre-filled "Edit Analysis Event" form for that specific payment.
 - You can also **+ Add Event** to any month.
 
-Annual view rows are not expandable; switch to Monthly view to inspect or edit individual period events.
+Annual view rows are not expandable; switch to Monthly view to inspect or edit individual period events. Expandable rows are only available when the base scenario is selected.
 
 The expanded sub-table shows **Name, Category, Type, Amount**, and an Edit button. Rows are sorted by type (Income → One-time In → Expense → Loan Payment → One-time Out), then by amount largest-to-smallest within each type.
 
@@ -199,7 +203,7 @@ After editing, a warning banner appears at the top of the page indicating the re
 
 **Baseline Values Over Time table:**
 
-Below the detail table, a second table shows every asset, liability, and the accumulated cash flow with four columns: **Start**, **At Month** (interactive), **Change**, and **End**. Use the dropdown to pick any month in the forecast period — the "At Month" column updates instantly to show what each account balance or loan balance looks like at that point. Assets created by "Deposit into Asset" events that don't exist in the baseline are shown as **Asset (new)** rows starting from $0.
+Below the detail table, a second table shows every asset, liability, and the accumulated cash flow with four columns: **Start**, **At Month** (interactive), **Change**, and **End**. Use the dropdown to pick any month in the forecast period — the "At Month" column updates instantly to show what each account balance or loan balance looks like at that point. Assets created by "Deposit into Asset" events that don't exist in the baseline are shown as **Asset (new)** rows starting from $0. When the **Compare Scenario** is selected via the toggle, this table reflects the compare baseline's assets and liabilities.
 
 ---
 
@@ -207,19 +211,23 @@ Below the detail table, a second table shows every asset, liability, and the acc
 
 A full list of all events used in the analysis, including one row per monthly loan payment for each amortizing liability. It is paginated (25 rows per page) and can be filtered and sorted.
 
+**Scenario selector (compare configs only):** A toggle at the top of the tab switches the table between **Base Scenario** and **Compare Scenario** events. The compare events table is read-only (no Edit buttons) — overrides are only available for the base scenario.
+
 **Sorting:** Click the **Month** column header (▲/▼) to toggle between oldest-first and newest-first order. The sort direction indicator updates in the header.
 
 **Name search:** Type in the search box and click the **🔍** button (or press Enter) to apply the filter. The table does not refresh on every keystroke — the filter is only applied when you commit it. Click **Clear filters** to reset all active filters including the search.
 
-Columns: **Month**, **Name**, **Category**, **Type**, **Amount**, and an **Edit** button. Within each month, rows are sorted by type (Income → One-time In → Expense → Loan Payment → One-time Out), then by amount largest-to-smallest.
+Columns: **Month**, **Name**, **Category**, **Type**, **Amount**, and an **Edit** button (base scenario only). Within each month, rows are sorted by type (Income → One-time In → Expense → Loan Payment → One-time Out), then by amount largest-to-smallest.
 
-Click **Edit** on any row to open the override modal for that event, or to create a pre-filled override for a Loan Payment row. Click **Export CSV** to download the full list.
+Click **Edit** on any row to open the override modal for that event, or to create a pre-filled override for a Loan Payment row. Click **Export CSV** to download the full list (exports the currently-selected scenario).
 
 ---
 
 #### Balance Review tab
 
 Select any asset, liability, or **Accumulated Cash Flow** from the dropdown. The tab shows a chart of that item's balance over the forecast period plus a monthly breakdown table.
+
+**Compare scenario:** When the analysis has a Compare Scenario, the chart plots both the base and compare lines simultaneously (base in blue, compare in green). Two breakdown tables are shown stacked — one for each scenario with a heading above each — using the same dropdown selection.
 
 Table columns vary by item type:
 

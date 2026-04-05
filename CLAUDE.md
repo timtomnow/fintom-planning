@@ -18,7 +18,7 @@ This is a self-contained, single-page financial planning app. No framework, no b
 | `js/pages/baselines.js` | renderBaselines, renderBaselineDetail, openBaselineModal, duplicateBaseline, deleteBaseline, openAssetModal, toggleInvestFields, deleteAsset, openLiabilityModal, toggleAmortFields, onPayModeChange, deleteLiability. |
 | `js/pages/events.js` | renderEvents, openEventModal, onEvTypeChange, onEvRecChange, deleteEvent, renderEventSets, renderEventSetDetail, openEventSetModal, openEventSetEventsModal, removeEventFromSet, deleteEventSet. |
 | `js/pages/analysis.js` | renderAnalysis, openConfigModal, toggleMCFields, deleteConfig, resolveEventSets, resolveEffectiveEvents, getEventsForPeriod, runAndView. |
-| `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, renderEventsTableSection, etc.), tab state (_resultsTab, _brSelectedItem, _brChart) + functions (switchResultsTab, renderBalanceReviewContent, attachBalanceReviewChart, onBrItemChange), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt. |
+| `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, _cmpEvTableData, renderEventsTableSection, etc.), tab state (_resultsTab, _brSelectedItem, _brChart, _overviewScenario, _evTableScenario) + functions (switchResultsTab, switchOverviewScenario, switchEvTableScenario, renderBalanceReviewContent, attachBalanceReviewChart, onBrItemChange), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt. |
 | `js/pages/settings.js` | renderSettings, saveSettings, confirmClear. |
 | `README.md` | End-user instructions (Markdown). |
 
@@ -314,11 +314,16 @@ The Results page uses three tabs managed by module-level state:
 - `_resultsTab` — `'overview'` | `'events'` | `'balance-review'` (persists during the session; survives view-mode switches)
 - `switchResultsTab(tab)` — toggles `display` on `#results-tab-overview`, `#results-tab-events`, `#results-tab-balance-review` divs and updates `.results-tab-btn.active`; calls `_refreshBalanceReview()` when switching to the balance-review tab
 
-**Tab 1 — Overview:** summary stats, Net Worth chart, Cash Flow chart, Monthly/Annual Detail table, Baseline Values Over Time table.
+**Compare scenario state** (only active when `cfg.compareBaselineId` or `cfg.compareEventSetIds` is set):
+- `_overviewScenario` — `'base'` | `'compare'`; controls which scenario's Monthly Detail and Baseline Values tables are shown in the Overview tab. Toggled by a **Tables showing:** toggle that appears below the charts. Switching calls `switchOverviewScenario(scenario)` which triggers a full `navigate('results')` re-render (needed to preserve expandable rows).
+- `_evTableScenario` — `'base'` | `'compare'`; controls which scenario is shown in the Event Details tab. Toggled by a **Scenario:** toggle rendered inside `#ev-table-section`. Switching calls `switchEvTableScenario(scenario)` which calls `_refreshEvTable()` only.
+- `_cmpEvTableData` — compare-scenario expanded events; built in `renderResults` immediately after `_evTableData` using `resolveEventSets(cfg.compareEventSetIds)` + compare baseline's liab snapshots. No overrides applied (overrides are primary-only). Read by `renderEventsTableSection` when `_evTableScenario === 'compare'` and by `renderBalanceReviewContent` for the compare breakdown table.
 
-**Tab 2 — Event Details:** the `#ev-table-section` div containing `renderEventsTableSection()`. Moved from the Overview tab. `_refreshEvTable()` still works because `getElementById` finds the element even when the tab is hidden.
+**Tab 1 — Overview:** summary stats, Net Worth chart, Cash Flow chart, optional scenario switcher, Monthly/Annual Detail table, Baseline Values Over Time table. When compare exists, the Detail table uses `ovDet`/`ovCmp`/`ovMc` locals (derived from `_overviewScenario`). Expandable detail rows are disabled when `_overviewScenario === 'compare'`. `updateBaselineValuesAt()` reads from `cmpResults` when `_overviewScenario === 'compare'`.
 
-**Tab 3 — Balance Review:** dropdown + balance chart (`chart-br`) + monthly breakdown table. See § Balance Review Tab below.
+**Tab 2 — Event Details:** the `#ev-table-section` div containing `renderEventsTableSection()`. When compare exists, a scenario toggle is rendered inside the section (so it is refreshed by `_refreshEvTable()`). Compare events are read-only — no Edit buttons. `exportEventsCSV()` exports the currently-selected scenario's data.
+
+**Tab 3 — Balance Review:** dropdown + balance chart (`chart-br`) + breakdown table(s). When compare exists: the chart shows both scenarios as separate lines; two breakdown tables are stacked with scenario headings. See § Balance Review Tab below.
 
 ### Expandable Detail Rows
 
@@ -367,8 +372,9 @@ When `existingId` is a per-month expansion of a recurring event (ID `monthly-${s
 
 ### All Analysis Events Table
 
-`renderEventsTableSection()` — renders the paginated, filterable, sortable events table at the bottom of the Results page into `<div id="ev-table-section">`. Module-level state:
+`renderEventsTableSection()` — renders the paginated, filterable, sortable events table at the bottom of the Results page into `<div id="ev-table-section">`. When a compare scenario exists, a scenario toggle is rendered at the top of the section (inside `#ev-table-section` so it refreshes with `_refreshEvTable()`). Module-level state:
 - `_evTableData` — built in `renderResults`: recurring events from `resolveEffectiveEvents(cfg)` are expanded into per-month entries (one row per active month, with inflation pre-applied), one-time events are included once, and synthetic `loan_payment` entries are appended (one per month per amortizing liability). Each per-month recurring row has a synthetic ID `monthly-${ev.id}-${month}`, `_sourceId = ev.id`, `_month = month`, `isRecurring: false`, `inflationAdjusted: false`.
+- `_cmpEvTableData` — same structure as `_evTableData` but for the compare scenario. Built from `resolveEventSets(cfg.compareEventSetIds)` (no overrides) + compare baseline liab snapshots. Populated immediately after `_evTableData` in `renderResults`; empty array when no compare scenario.
 - `_evTablePage` — current page index (0-based)
 - `_evTableCatFilter`, `_evTableTypeFilter` — `Set` of active filter values
 - `_evTableNameFilter` — committed text search string (applied to the table)
@@ -404,23 +410,30 @@ Payment = `(prevBalance − currBalance − extraPrincipal) + interest`. Extra p
 - `loan_payment`: `−amount` unless `l.paymentAssetName` is set (then `0`); liability found via `_liabId`.
 - Other types: same rules as `calcCF` in `getEventsForPeriod` (transfers, asset routing → `0`).
 
-**Edit button**: calls `openOverrideEventModal(cfg.id, e.id, e.startDate)` for all rows. For loan payment rows this resolves via `_evTableData` fallback and opens "Edit Analysis Event" pre-filled as an expense.
+**Edit button**: calls `openOverrideEventModal(cfg.id, e.id, e.startDate)` for all rows (base scenario only). Compare scenario rows have no Edit button (read-only).
 
 Filter dropdowns use `.ev-filter-dropdown` (absolute-positioned, `z-index:50`). `toggleEvFilterDD(id)` shows one and hides others. `_refreshEvTable()` re-renders just the `#ev-table-section` innerHTML without navigating.
 
 `typeLabel` and `badgeClass` in both `renderResults` and `renderEventsTableSection` map `'loan_payment'` → `'Loan Payment'` / `'neutral'` badge.
 
+`exportEventsCSV()` exports either `_evTableData` or `_cmpEvTableData` depending on `_evTableScenario`.
+
 ### Balance Review Tab
 
-`renderBalanceReviewContent()` — builds the dropdown, breakdown table, and chart canvas for the Balance Review tab. Uses `_evTableData` (already populated by `renderResults`) to derive per-month event impacts without re-running the engine.
+`renderBalanceReviewContent()` — builds the dropdown, breakdown table(s), and chart canvas for the Balance Review tab. Uses `_evTableData` and (when compare exists) `_cmpEvTableData` to derive per-month event impacts without re-running the engine.
 
-**Dropdown options:**
+**Dropdown options** (built from primary baseline; shared between both scenarios when compare exists):
 1. `''` → Accumulated Cash Flow (default)
 2. `'asset:<name>'` → each asset in the primary baseline
 3. `'asset:<name>'` → virtual assets (created by depositToAssetName events not in baseline)
 4. `'liab:<name>'` → each liability in the primary baseline
 
 `_brSelectedItem` stores the current dropdown value. `onBrItemChange(val)` updates it and calls `_refreshBalanceReview()`.
+
+**When compare scenario exists:**
+- The breakdown logic is extracted into `buildRows(results, blObj, evData)` and `buildTableHtml(rows)` local functions so it can be called for both scenarios.
+- Two tables are rendered stacked: base scenario first (with the primary baseline name as heading), then compare scenario.
+- The chart (`chart-br`) plots both scenarios as separate lines — base in blue, compare in green — with a legend shown.
 
 **Breakdown columns by item type:**
 
@@ -430,9 +443,9 @@ Filter dropdowns use `.ev-filter-dropdown` (absolute-positioned, `z-index:50`). 
 | Asset | Starting Balance · Growth / Loss (net change minus events impact) · Events (deposits via depositToAssetName, withdrawals via payFromAssetName, transfers via linkedAssetName, loan payments via paymentAssetName) · Net Change · Ending Balance |
 | Liability | Starting Balance · Interest (prevBalance × effectiveRate / 12 / 100) · Principal Paid (startBal − endBal, clamped ≥ 0) · Net Change · Ending Balance |
 
-Starting/ending balances come directly from `assetSnapshots` / `liabSnapshots` / `r.cashFlow` on the monthly `detResults` — no recalculation needed.
+Starting/ending balances come directly from `assetSnapshots` / `liabSnapshots` / `r.cashFlow` on the monthly results — no recalculation needed.
 
-**Chart:** `chart-br` canvas. `attachBalanceReviewChart()` creates a Chart.js line chart (balance over time) and pushes the instance to both `_brChart` and `state.activeCharts`. The chart is destroyed and recreated whenever the dropdown changes or the tab is re-shown.
+**Chart:** `chart-br` canvas. `attachBalanceReviewChart()` creates a Chart.js line chart and pushes the instance to both `_brChart` and `state.activeCharts`. When compare exists it adds a second dataset (green, no fill). Legend is shown only when compare exists. The chart is destroyed and recreated whenever the dropdown changes or the tab is re-shown.
 
 `_brChart = null` is reset at the top of `renderResults` (after `destroyCharts()` has already destroyed it) to prevent a double-destroy on the next render.
 
