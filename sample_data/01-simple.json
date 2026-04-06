@@ -2,14 +2,14 @@
   "version": 1,
   "baselines": [
     {
-      "id": "b-simple-1",
+      "id": "b-sm-1",
       "name": "April 2026",
       "description": "Starting snapshot for a single person renting an apartment.",
       "date": "2026-04",
       "createdAt": "2026-04-01T00:00:00.000Z",
       "assets": [
         {
-          "id": "a-simple-1",
+          "id": "a-sm-1",
           "name": "Chequing",
           "value": 8500,
           "category": "Bank Account",
@@ -20,7 +20,7 @@
           "annualStdDev": 15
         },
         {
-          "id": "a-simple-2",
+          "id": "a-sm-2",
           "name": "High-Interest Savings",
           "value": 22000,
           "category": "Bank Account",
@@ -36,8 +36,9 @@
   ],
   "events": [
     {
-      "id": "e-simple-1",
+      "id": "e-sm-1",
       "name": "Monthly Salary",
+      "notes": "Gross monthly salary. After-tax amount deposits directly into Chequing.",
       "category": "Income",
       "type": "income",
       "amount": 5500,
@@ -46,15 +47,15 @@
       "startDate": "2026-04",
       "endDate": "",
       "inflationAdjusted": true,
-      "notes": "Gross monthly salary. After-tax amount deposits directly into Chequing.",
-      "linkedAssetName": "",
       "depositToAssetName": "Chequing",
       "payFromAssetName": "",
+      "linkedAssetName": "",
       "linkedLiabilityName": ""
     },
     {
-      "id": "e-simple-2",
+      "id": "e-sm-2",
       "name": "Rent",
+      "notes": "",
       "category": "Housing",
       "type": "expense",
       "amount": 1850,
@@ -63,15 +64,15 @@
       "startDate": "2026-04",
       "endDate": "",
       "inflationAdjusted": true,
-      "notes": "",
-      "linkedAssetName": "",
       "depositToAssetName": "",
       "payFromAssetName": "Chequing",
+      "linkedAssetName": "",
       "linkedLiabilityName": ""
     },
     {
-      "id": "e-simple-3",
+      "id": "e-sm-3",
       "name": "Groceries",
+      "notes": "",
       "category": "Food & Dining",
       "type": "expense",
       "amount": 650,
@@ -80,15 +81,15 @@
       "startDate": "2026-04",
       "endDate": "",
       "inflationAdjusted": true,
-      "notes": "",
-      "linkedAssetName": "",
       "depositToAssetName": "",
       "payFromAssetName": "Chequing",
+      "linkedAssetName": "",
       "linkedLiabilityName": ""
     },
     {
-      "id": "e-simple-4",
+      "id": "e-sm-4",
       "name": "Utilities",
+      "notes": "",
       "category": "Utilities",
       "type": "expense",
       "amount": 180,
@@ -97,15 +98,15 @@
       "startDate": "2026-04",
       "endDate": "",
       "inflationAdjusted": true,
-      "notes": "",
-      "linkedAssetName": "",
       "depositToAssetName": "",
       "payFromAssetName": "Chequing",
+      "linkedAssetName": "",
       "linkedLiabilityName": ""
     },
     {
-      "id": "e-simple-5",
+      "id": "e-sm-5",
       "name": "Transit & Transport",
+      "notes": "",
       "category": "Transportation",
       "type": "expense",
       "amount": 200,
@@ -114,21 +115,27 @@
       "startDate": "2026-04",
       "endDate": "",
       "inflationAdjusted": false,
-      "notes": "",
-      "linkedAssetName": "",
       "depositToAssetName": "",
       "payFromAssetName": "Chequing",
+      "linkedAssetName": "",
       "linkedLiabilityName": ""
     }
   ],
-  "eventSets": [],
+  "eventSets": [
+    {
+      "id": "es-sm-1",
+      "name": "Monthly Budget",
+      "description": "All recurring income and expenses for the month.",
+      "eventIds": ["e-sm-1", "e-sm-2", "e-sm-3", "e-sm-4", "e-sm-5"]
+    }
+  ],
   "analysisConfigs": [
     {
-      "id": "c-simple-1",
+      "id": "c-sm-1",
       "name": "5-Year Outlook",
-      "baselineId": "b-simple-1",
+      "baselineId": "b-sm-1",
       "compareBaselineId": "",
-      "eventSetIds": [],
+      "eventSetIds": ["es-sm-1"],
       "compareEventSetIds": [],
       "startDate": "2026-04",
       "endDate": "2031-04",
