@@ -9,7 +9,7 @@ function renderDashboard() {
 
   let latestNW = null;
   if (baselines.length) {
-    const bl = baselines[baselines.length - 1];
+    const bl = baselines.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
     latestNW = (bl.assets ?? []).reduce((s, a) => s + a.value, 0)
              - (bl.liabilities ?? []).reduce((s, l) => s + l.value, 0);
   }

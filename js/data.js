@@ -134,10 +134,21 @@ function defaultEventSet() {
 function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    state.data = raw ? JSON.parse(raw) : defaultData();
+    if (!raw) { state.data = defaultData(); return; }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object'
+        || !Array.isArray(parsed.baselines)
+        || !Array.isArray(parsed.events)
+        || !Array.isArray(parsed.analysisConfigs)) {
+      console.warn('FinTom: stored data is malformed — resetting to default');
+      state.data = defaultData();
+      return;
+    }
+    state.data = parsed;
     // Migrate older saves that predate event sets
     state.data.eventSets = state.data.eventSets ?? [];
   } catch (e) {
+    console.warn('FinTom: could not parse stored data — resetting to default', e);
     state.data = defaultData();
   }
 }

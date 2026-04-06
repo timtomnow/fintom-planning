@@ -106,6 +106,12 @@ document.addEventListener('click', e => {
   if (e.target.id === 'modal-overlay') hideModal();
 });
 
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('modal-overlay').classList.contains('open')) {
+    hideModal();
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════
 // TOAST
 // ═══════════════════════════════════════════════════════════════
