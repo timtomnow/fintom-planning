@@ -21,3 +21,6 @@ finplan-backup-*.json
 forecast-*.csv
 financial-plan-export-*.json
 .app-template/
+
+# Claude Code local settings (machine-specific permissions)
+.claude/settings.local.json

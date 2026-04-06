@@ -3,7 +3,7 @@
 ## How to Run
 
 1. Open `index.html` in any modern web browser (Chrome, Firefox, Safari, Edge)
-2. An internet connection is required (Chart.js and help rendering are loaded from CDN)
+2. No internet connection required — all dependencies are bundled. (The in-app Help modal fetches `README.md` and `CLAUDE.md` via `fetch()`, which is blocked by most browsers when running from `file://`. This only affects the help modal; all other functionality works fully offline.)
 3. No installation, coding environment, or build step needed
 
 ---

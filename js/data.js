@@ -61,7 +61,7 @@ function defaultData() {
 function defaultAsset() {
   return {
     id: uuid(), name: '', value: 0,
-    category: 'Brokerage',
+    category: 'Investment Account',
     isInvestment: false, isLiquid: true,
     monthlyGrowthRate: 0,
     annualMeanReturn: 7, annualStdDev: 15,
@@ -143,7 +143,13 @@ function loadData() {
 }
 
 function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+  } catch (e) {
+    if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+      showToast('Storage full — export a backup and clear some data', 'error');
+    }
+  }
 }
 
 function exportData() {
@@ -169,7 +175,16 @@ function triggerImport() {
     const reader = new FileReader();
     reader.onload = ev => {
       try {
-        state.data = JSON.parse(ev.target.result);
+        const parsed = JSON.parse(ev.target.result);
+        if (!parsed || typeof parsed !== 'object'
+            || !Array.isArray(parsed.baselines)
+            || !Array.isArray(parsed.events)
+            || !Array.isArray(parsed.analysisConfigs)) {
+          showToast('Invalid file — missing required fields', 'error');
+          return;
+        }
+        state.data = parsed;
+        state.data.eventSets = state.data.eventSets ?? [];
         state.lastRun = null;
         state.lastRunConfig = null;
         saveData();

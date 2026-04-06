@@ -1,6 +1,6 @@
 # FinTom — Codebase Guide for Claude
 
-This is a self-contained, single-page financial planning app. No framework, no build step, no npm. Runs by opening `index.html` in any browser. Chart.js and marked.js loaded from CDN (internet required). Data persisted to `localStorage`.
+This is a self-contained, single-page financial planning app. No framework, no build step, no npm. Runs by opening `index.html` in any browser. Chart.js and marked.js are vendored in `js/vendor/` — no internet required for core functionality. Data persisted to `localStorage`.
 
 ---
 
@@ -8,7 +8,7 @@ This is a self-contained, single-page financial planning app. No framework, no b
 
 | File | Purpose |
 |---|---|
-| `index.html` | Shell. Loads Chart.js CDN, marked.js CDN, `styles.css`, and all JS files in order. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. |
+| `index.html` | Shell. Loads `js/vendor/chart.umd.min.js`, `js/vendor/marked.min.js`, `styles.css`, and all JS files in order. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. |
 | `styles.css` | Full design system. CSS variables in `:root`. No external dependencies. |
 | `js/utils.js` | Pure utility functions — uuid, date math, formatters (fmt$, fmtCompact, fmtPct), esc, deepClone, sampleNormal, pctValue, isEventActive. No state dependencies. |
 | `js/data.js` | Constants (STORAGE_KEY, ASSET_CATEGORIES, etc., SIDEBAR_MAP), state object, default-record factories (defaultData, defaultAsset, etc.), storage (loadData, saveData, exportData, triggerImport). |
