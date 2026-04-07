@@ -1092,20 +1092,24 @@ function renderResults() {
   // Populate events table data before rendering.
   // Recurring events are expanded into one entry per active month so the table
   // shows every occurrence individually and each month can be edited independently.
+  // Events are suppressed for months before the baseline date (mirrors engine behaviour).
   const baseEvents = resolveEffectiveEvents(cfg);
+  const blActiveFrom = pBl?.date ?? cfg.startDate;
   _evTableData = [];
   for (const ev of baseEvents) {
     // Monthly per-instance overrides are already one-time for a specific month — add directly
     if (ev._sourceId) {
-      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _evTableData.push(ev);
+      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate && ev.startDate >= blActiveFrom) _evTableData.push(ev);
       continue;
     }
     const isOneTime = !ev.isRecurring || ev.type === 'one_time_inflow' || ev.type === 'one_time_outflow';
     if (isOneTime) {
-      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _evTableData.push(ev);
+      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate && ev.startDate >= blActiveFrom) _evTableData.push(ev);
     } else {
-      // Expand recurring: one entry per active month within the analysis range
-      const startM = ev.startDate > cfg.startDate ? ev.startDate : cfg.startDate;
+      // Expand recurring: one entry per active month within the analysis range,
+      // starting no earlier than the baseline date.
+      const rangeFloor = blActiveFrom > cfg.startDate ? blActiveFrom : cfg.startDate;
+      const startM = ev.startDate > rangeFloor ? ev.startDate : rangeFloor;
       const endM   = ev.endDate ? (ev.endDate < cfg.endDate ? ev.endDate : cfg.endDate) : cfg.endDate;
       let month = startM;
       while (month <= endM) {
@@ -1174,17 +1178,19 @@ function renderResults() {
   _cmpEvTableData = [];
   if (run.cmpResults) {
     const cmpBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId) ?? pBl;
+    const cmpBlActiveFrom = cmpBl?.date ?? cfg.startDate;
     const cmpBaseEvents = resolveEventSets(cfg.compareEventSetIds);
     for (const ev of cmpBaseEvents) {
       if (ev._sourceId) {
-        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _cmpEvTableData.push(ev);
+        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate && ev.startDate >= cmpBlActiveFrom) _cmpEvTableData.push(ev);
         continue;
       }
       const isOneTime = !ev.isRecurring || ev.type === 'one_time_inflow' || ev.type === 'one_time_outflow';
       if (isOneTime) {
-        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _cmpEvTableData.push(ev);
+        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate && ev.startDate >= cmpBlActiveFrom) _cmpEvTableData.push(ev);
       } else {
-        const startM = ev.startDate > cfg.startDate ? ev.startDate : cfg.startDate;
+        const cmpRangeFloor = cmpBlActiveFrom > cfg.startDate ? cmpBlActiveFrom : cfg.startDate;
+        const startM = ev.startDate > cmpRangeFloor ? ev.startDate : cmpRangeFloor;
         const endM   = ev.endDate ? (ev.endDate < cfg.endDate ? ev.endDate : cfg.endDate) : cfg.endDate;
         let month = startM;
         while (month <= endM) {
