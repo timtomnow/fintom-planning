@@ -1092,20 +1092,24 @@ function renderResults() {
   // Populate events table data before rendering.
   // Recurring events are expanded into one entry per active month so the table
   // shows every occurrence individually and each month can be edited independently.
+  // Events are suppressed for months before the baseline date (mirrors engine behaviour).
   const baseEvents = resolveEffectiveEvents(cfg);
+  const blActiveFrom = pBl?.date ?? cfg.startDate;
   _evTableData = [];
   for (const ev of baseEvents) {
     // Monthly per-instance overrides are already one-time for a specific month — add directly
     if (ev._sourceId) {
-      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _evTableData.push(ev);
+      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate && ev.startDate >= blActiveFrom) _evTableData.push(ev);
       continue;
     }
     const isOneTime = !ev.isRecurring || ev.type === 'one_time_inflow' || ev.type === 'one_time_outflow';
     if (isOneTime) {
-      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _evTableData.push(ev);
+      if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate && ev.startDate >= blActiveFrom) _evTableData.push(ev);
     } else {
-      // Expand recurring: one entry per active month within the analysis range
-      const startM = ev.startDate > cfg.startDate ? ev.startDate : cfg.startDate;
+      // Expand recurring: one entry per active month within the analysis range,
+      // starting no earlier than the baseline date.
+      const rangeFloor = blActiveFrom > cfg.startDate ? blActiveFrom : cfg.startDate;
+      const startM = ev.startDate > rangeFloor ? ev.startDate : rangeFloor;
       const endM   = ev.endDate ? (ev.endDate < cfg.endDate ? ev.endDate : cfg.endDate) : cfg.endDate;
       let month = startM;
       while (month <= endM) {
@@ -1174,17 +1178,19 @@ function renderResults() {
   _cmpEvTableData = [];
   if (run.cmpResults) {
     const cmpBl = state.data.baselines.find(b => b.id === cfg.compareBaselineId) ?? pBl;
+    const cmpBlActiveFrom = cmpBl?.date ?? cfg.startDate;
     const cmpBaseEvents = resolveEventSets(cfg.compareEventSetIds);
     for (const ev of cmpBaseEvents) {
       if (ev._sourceId) {
-        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _cmpEvTableData.push(ev);
+        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate && ev.startDate >= cmpBlActiveFrom) _cmpEvTableData.push(ev);
         continue;
       }
       const isOneTime = !ev.isRecurring || ev.type === 'one_time_inflow' || ev.type === 'one_time_outflow';
       if (isOneTime) {
-        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate) _cmpEvTableData.push(ev);
+        if (ev.startDate >= cfg.startDate && ev.startDate <= cfg.endDate && ev.startDate >= cmpBlActiveFrom) _cmpEvTableData.push(ev);
       } else {
-        const startM = ev.startDate > cfg.startDate ? ev.startDate : cfg.startDate;
+        const cmpRangeFloor = cmpBlActiveFrom > cfg.startDate ? cmpBlActiveFrom : cfg.startDate;
+        const startM = ev.startDate > cmpRangeFloor ? ev.startDate : cmpRangeFloor;
         const endM   = ev.endDate ? (ev.endDate < cfg.endDate ? ev.endDate : cfg.endDate) : cfg.endDate;
         let month = startM;
         while (month <= endM) {
@@ -1253,6 +1259,7 @@ function renderResults() {
   const effectiveEvents    = _evTableData.filter(e => e.type !== 'loan_payment');
   const cmpEffectiveEvents = _cmpEvTableData.filter(e => e.type !== 'loan_payment');
   const cmpBl = cBl ?? pBl; // compare baseline (falls back to primary for same-baseline comparisons)
+  const cmpBlActiveFrom = cmpBl?.date ?? cfg.startDate;
   const typeLabel = t => ({ income: 'Income', expense: 'Expense', one_time_inflow: 'One-time In', one_time_outflow: 'One-time Out', loan_payment: 'Loan Payment' }[t] ?? t);
   const badgeClass = t => ({ income: 'income', expense: 'expense', one_time_inflow: 'one-time', one_time_outflow: 'one-time', loan_payment: 'neutral' }[t] ?? '');
 
@@ -1274,6 +1281,7 @@ function renderResults() {
         let totalPayment = 0;
         let totalCF = 0;
         for (const month of months) {
+          if (month < blActiveFrom) continue; // suppress before baseline is active
           const currIdx = detMonthly.findIndex(r => r.month === month);
           if (currIdx < 0) continue;
           const currResult = detMonthly[currIdx];
@@ -1377,6 +1385,7 @@ function renderResults() {
               .filter(m => m >= cfg.startDate && m <= cfg.endDate);
         let totalPayment = 0;
         for (const month of months) {
+          if (month < cmpBlActiveFrom) continue; // suppress before compare baseline is active
           const currIdx = cmpMonthly.findIndex(r => r.month === month);
           if (currIdx < 0) continue;
           const currResult = cmpMonthly[currIdx];
@@ -1658,6 +1667,11 @@ function attachResultsCharts() {
   const cmp = run.cmpResults ? (vm === 'yearly' ? aggregateYearly(run.cmpResults) : run.cmpResults) : null;
   const mc  = run.mcResults  ? (vm === 'yearly' ? aggregateMCYearly(run.mcResults) : run.mcResults) : null;
 
+  // Null out data points before each baseline's active date so the chart line starts
+  // at the baseline date rather than showing a misleading flat segment.
+  const pBlActiveFrom = pBl?.date ?? cfg.startDate;
+  const cBlActiveFrom = (cBl ?? pBl)?.date ?? cfg.startDate;
+
   const labels = det.map(r => vm === 'yearly' ? r.month : monthLabel(r.month));
 
   const commonOpts = {
@@ -1678,12 +1692,12 @@ function attachResultsCharts() {
   if (mc) {
     // Confidence bands using fill:'+1' to fill between adjacent percentile lines
     nwDatasets.push(
-      { label: '', data: mc.map(r => r.p90), borderWidth: 0, pointRadius: 0, backgroundColor: 'rgba(37,99,235,0.07)', fill: '+1', tension: 0.3 },
-      { label: '', data: mc.map(r => r.p75), borderWidth: 0, pointRadius: 0, backgroundColor: 'rgba(37,99,235,0.13)', fill: '+1', tension: 0.3 },
-      { label: '', data: mc.map(r => r.p25), borderWidth: 0, pointRadius: 0, backgroundColor: 'rgba(37,99,235,0.07)', fill: '+1', tension: 0.3 },
-      { label: '', data: mc.map(r => r.p10), borderWidth: 0, pointRadius: 0, backgroundColor: 'transparent', fill: false, tension: 0.3 },
-      { label: 'Median', data: mc.map(r => r.p50), borderColor: '#2563eb', borderWidth: 2.5, fill: false, tension: 0.3 },
-      { label: 'Deterministic', data: det.map(r => r.netWorth), borderColor: '#94a3b8', borderWidth: 1.5, borderDash: [5, 4], fill: false, tension: 0.3 }
+      { label: '', data: mc.map(r => r.month >= pBlActiveFrom ? r.p90 : null), borderWidth: 0, pointRadius: 0, backgroundColor: 'rgba(37,99,235,0.07)', fill: '+1', tension: 0.3 },
+      { label: '', data: mc.map(r => r.month >= pBlActiveFrom ? r.p75 : null), borderWidth: 0, pointRadius: 0, backgroundColor: 'rgba(37,99,235,0.13)', fill: '+1', tension: 0.3 },
+      { label: '', data: mc.map(r => r.month >= pBlActiveFrom ? r.p25 : null), borderWidth: 0, pointRadius: 0, backgroundColor: 'rgba(37,99,235,0.07)', fill: '+1', tension: 0.3 },
+      { label: '', data: mc.map(r => r.month >= pBlActiveFrom ? r.p10 : null), borderWidth: 0, pointRadius: 0, backgroundColor: 'transparent', fill: false, tension: 0.3 },
+      { label: 'Median', data: mc.map(r => r.month >= pBlActiveFrom ? r.p50 : null), borderColor: '#2563eb', borderWidth: 2.5, fill: false, tension: 0.3 },
+      { label: 'Deterministic', data: det.map(r => r.month >= pBlActiveFrom ? r.netWorth : null), borderColor: '#94a3b8', borderWidth: 1.5, borderDash: [5, 4], fill: false, tension: 0.3 }
     );
     if (cfg.monteCarlo.standardOfLivingMonthly > 0) {
       const target = cfg.monteCarlo.standardOfLivingMonthly * 12 * 25;
@@ -1696,7 +1710,7 @@ function attachResultsCharts() {
   } else {
     nwDatasets.push({
       label: pLabel,
-      data: det.map(r => r.netWorth),
+      data: det.map(r => r.month >= pBlActiveFrom ? r.netWorth : null),
       borderColor: '#2563eb', borderWidth: 2.5,
       backgroundColor: 'rgba(37,99,235,0.07)', fill: 'origin', tension: 0.3,
     });
@@ -1705,7 +1719,7 @@ function attachResultsCharts() {
   if (cmp) {
     nwDatasets.push({
       label: cLabel,
-      data: cmp.map(r => r.netWorth),
+      data: cmp.map(r => r.month >= cBlActiveFrom ? r.netWorth : null),
       borderColor: '#16a34a', borderWidth: 2.5,
       backgroundColor: 'transparent', fill: false, tension: 0.3,
     });
@@ -1742,7 +1756,7 @@ function attachResultsCharts() {
       labels,
       datasets: [{
         label: 'Cumulative Cash Flow',
-        data: det.map(r => r.cashFlow),
+        data: det.map(r => r.month >= pBlActiveFrom ? r.cashFlow : null),
         borderColor: cfColor, borderWidth: 2,
         backgroundColor: cfColor.replace(')', ',0.07)').replace('rgb', 'rgba'),
         fill: 'origin', tension: 0.3,

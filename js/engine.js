@@ -14,6 +14,10 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
   const baseline = state.data.baselines.find(b => b.id === baselineId);
   if (!baseline) return [];
 
+  // The baseline date is the month this snapshot becomes active.
+  // Events, asset growth, and liability amortization are suppressed for months before this date.
+  const baselineActiveFrom = baseline.date ?? config.startDate;
+
   const months = getMonthRange(config.startDate, config.endDate);
   const assets = deepClone(baseline.assets ?? []);
   const liabilities = deepClone(baseline.liabilities ?? []);
@@ -61,6 +65,10 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
     let incomeThisMonth   = 0;
     let expenseThisMonth  = 0;
     let transferThisMonth = 0;
+
+    // Only apply growth, amortization, and events once the baseline is active.
+    // Before the baseline date the forecast holds at the initial snapshot values.
+    if (month >= baselineActiveFrom) {
 
     // 1. Grow assets
     for (const a of assets) {
@@ -210,6 +218,8 @@ function runSingleForecast(baselineId, config, returnSampler = null, amountSampl
         }
       }
     }
+
+    } // end if (month >= baselineActiveFrom)
 
     // 4. Net worth = assets + cashFlow − liabilities
     const assetTotal      = assets.reduce((s, a) => s + a.value, 0);

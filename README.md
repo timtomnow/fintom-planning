@@ -25,6 +25,8 @@ Your data is saved automatically in the browser's **local storage** after every 
 
 A baseline is a snapshot of your net worth at a specific date. It contains a list of assets and liabilities. You can create multiple baselines, duplicate them, and use any one as the starting point for an analysis run.
 
+The **baseline date** is the month the snapshot becomes active. If the analysis start date is earlier than the baseline date, the forecast holds the baseline's initial values flat (no growth, no payments, no events) until the baseline date is reached. This allows you to compare baselines with different start dates — a future baseline simply contributes nothing until its date arrives.
+
 **Tip:** Duplicate your current baseline to model "what if" scenarios — e.g., selling a house, changing jobs, paying off a loan early.
 
 ---
