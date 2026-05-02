@@ -23,11 +23,15 @@ const EVENT_CATEGORIES = [
   'Living Expenses', 'Transfers', 'Other',
 ];
 
-// Maps sub-pages to their parent sidebar page for active highlighting (desktop)
+// Maps any page to its parent sidebar item for active highlighting (desktop)
 const SIDEBAR_MAP = {
-  'baseline-detail': 'baselines',
-  'event-set-detail': 'event-sets',
-  'results': 'analysis',
+  'baselines':        'inputs',
+  'events':           'inputs',
+  'event-sets':       'inputs',
+  'inputs':           'inputs',
+  'baseline-detail':  'inputs',
+  'event-set-detail': 'inputs',
+  'results':          'analysis',
 };
 
 // Maps any page to one of the 4 bottom nav tabs (mobile)

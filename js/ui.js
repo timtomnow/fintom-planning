@@ -165,12 +165,10 @@ function navigate(page, params = {}) {
 
 function buildSidebar() {
   const sidebarNav = [
-    { page: 'dashboard',  icon: '⊞', label: 'Dashboard' },
-    { page: 'baselines',  icon: '🏦', label: 'Baselines' },
-    { page: 'events',     icon: '📅', label: 'Events' },
-    { page: 'event-sets', icon: '🗂', label: 'Event Sets' },
-    { page: 'analysis',   icon: '📈', label: 'Analysis' },
-    { page: 'settings',   icon: '⚙',  label: 'Settings' },
+    { page: 'dashboard', icon: '⊞', label: 'Dashboard' },
+    { page: 'inputs',    icon: '📁', label: 'Inputs' },
+    { page: 'analysis',  icon: '📈', label: 'Analysis' },
+    { page: 'settings',  icon: '⚙',  label: 'Settings' },
   ];
   const bottomNav = [
     { page: 'dashboard', icon: '⊞', label: 'Dashboard' },
