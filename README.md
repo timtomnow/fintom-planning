@@ -8,6 +8,29 @@
 
 ---
 
+## Installing as a Mobile App (PWA)
+
+FinTom can be installed as a Progressive Web App for a native app-like experience on mobile (iOS and Android) and desktop. Once installed it works fully offline — all data stays in local storage on your device.
+
+**Note:** The service worker that enables offline use and installation requires the app to be served over HTTP or HTTPS — it will not activate from a `file://` URL. A simple one-line local server is all you need:
+
+```
+python3 -m http.server 8080
+```
+
+Then open `http://localhost:8080` in your browser.
+
+**To install:**
+- **Android (Chrome):** tap the "Add to Home Screen" or "Install app" prompt in the browser menu
+- **iPhone / iPad (Safari):** tap the Share button → "Add to Home Screen"
+- **Desktop (Chrome / Edge):** click the install icon (⊕) in the address bar
+
+**Adding icons:** Place your PNG icon files in the `icons/` directory — see `icons/ICONS_NEEDED.md` for the required sizes. The app works without them but icons are needed for the browser install prompt and home screen.
+
+**Updating the app cache:** After changing any app files, bump the `CACHE_VERSION` string in `sw.js` (e.g. `fintom-v1` → `fintom-v2`) so installed devices pick up the new version.
+
+---
+
 ## Data Storage
 
 Your data is saved automatically in the browser's **local storage** after every change. If you clear browser data, your FinTom data will be lost.

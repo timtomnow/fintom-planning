@@ -11,12 +11,13 @@ This is a self-contained, single-page financial planning app. No framework, no b
 | `index.html` | Shell. Loads `js/vendor/chart.umd.min.js`, `js/vendor/marked.min.js`, `styles.css`, and all JS files in order. Contains `#app`, `#sidebar`, `#main`, `#modal-overlay`, `#toast-container`. |
 | `styles.css` | Full design system. CSS variables in `:root`. No external dependencies. |
 | `js/utils.js` | Pure utility functions — uuid, date math, formatters (fmt$, fmtCompact, fmtPct), esc, deepClone, sampleNormal, pctValue, isEventActive. No state dependencies. |
-| `js/data.js` | Constants (STORAGE_KEY, ASSET_CATEGORIES, etc., SIDEBAR_MAP), state object, default-record factories (defaultData, defaultAsset, etc.), storage (loadData, saveData, exportData, triggerImport). |
+| `js/data.js` | Constants (STORAGE_KEY, ASSET_CATEGORIES, etc., SIDEBAR_MAP, BOTTOM_NAV_MAP), state object, default-record factories (defaultData, defaultAsset, etc.), storage (loadData, saveData, exportData, triggerImport). |
 | `js/engine.js` | Forecast engine — runSingleForecast, runDeterministicForecast, runMonteCarloForecast, aggregateYearly, aggregateMCYearly. Reads state; no DOM. |
 | `js/ui.js` | Shared UI infrastructure — chart helpers (destroyCharts, makeChart), modals (showModal, showConfirm, hideModal, showHelpModal, switchHelpTab), showToast, navigate, buildSidebar, DOMContentLoaded init. |
 | `js/pages/dashboard.js` | renderDashboard. |
 | `js/pages/baselines.js` | renderBaselines, renderBaselineDetail, openBaselineModal, duplicateBaseline, deleteBaseline, openAssetModal, toggleInvestFields, deleteAsset, openLiabilityModal, toggleAmortFields, onPayModeChange, deleteLiability. |
 | `js/pages/events.js` | renderEvents, openEventModal, onEvTypeChange, onEvRecChange, deleteEvent, renderEventSets, renderEventSetDetail, openEventSetModal, openEventSetEventsModal, removeEventFromSet, deleteEventSet. |
+| `js/pages/inputs.js` | renderInputs. Mobile navigation hub — three tap-to-navigate cards linking to Baselines, Events, and Event Sets. Shown via the mobile bottom nav Inputs tab; not in the desktop sidebar. |
 | `js/pages/analysis.js` | renderAnalysis, openConfigModal, toggleMCFields, deleteConfig, resolveEventSets, resolveEffectiveEvents, getEventsForPeriod, runAndView. |
 | `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, _cmpEvTableData, renderEventsTableSection, etc.), tab state (_resultsTab, _brSelectedItem, _brChart, _overviewScenario, _evTableScenario) + functions (switchResultsTab, switchOverviewScenario, switchEvTableScenario, renderBalanceReviewContent, attachBalanceReviewChart, onBrItemChange, renderBaselineValuesContent, renderAnalysisConfigContent), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt, updateBaselineCmpValuesAt. |
 | `js/pages/settings.js` | renderSettings, saveSettings, confirmClear. |
@@ -27,7 +28,7 @@ This is a self-contained, single-page financial planning app. No framework, no b
 ```
 js/utils.js → js/data.js → js/engine.js → js/ui.js →
 js/pages/dashboard.js → js/pages/baselines.js → js/pages/events.js →
-js/pages/analysis.js → js/pages/results.js → js/pages/settings.js
+js/pages/inputs.js → js/pages/analysis.js → js/pages/results.js → js/pages/settings.js
 ```
 
 All files use global scope (no ES modules). Order enforces dependencies. `file://` compatible.
@@ -544,6 +545,7 @@ ASSET_CATEGORIES      // array of strings
 LIABILITY_CATEGORIES  // array of strings
 EVENT_CATEGORIES      // array of strings
 SIDEBAR_MAP           // { 'baseline-detail': 'baselines', 'event-set-detail': 'event-sets', 'results': 'analysis' }
+BOTTOM_NAV_MAP        // maps any page → one of: dashboard | inputs | analysis | settings (mobile bottom nav active state)
 ```
 
 ---

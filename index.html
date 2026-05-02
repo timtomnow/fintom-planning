@@ -6,6 +6,12 @@
   <meta name="description" content="FinTom — open-source household financial planning. Model assets, liabilities, and cash flows with deterministic and Monte Carlo forecasts.">
   <title>FinTom</title>
   <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="FinTom">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="styles.css">
   <script src="js/vendor/chart.umd.min.js"></script>
   <script src="js/vendor/marked.min.js"></script>
@@ -15,6 +21,7 @@
     <aside id="sidebar"></aside>
     <main id="main"></main>
   </div>
+  <nav id="bottom-nav"></nav>
   <div id="modal-overlay"><div id="modal"></div></div>
   <div id="toast-container"></div>
   <script src="js/utils.js"></script>
@@ -24,8 +31,14 @@
   <script src="js/pages/dashboard.js"></script>
   <script src="js/pages/baselines.js"></script>
   <script src="js/pages/events.js"></script>
+  <script src="js/pages/inputs.js"></script>
   <script src="js/pages/analysis.js"></script>
   <script src="js/pages/results.js"></script>
   <script src="js/pages/settings.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+  </script>
 </body>
 </html>

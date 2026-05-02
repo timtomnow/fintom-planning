@@ -134,12 +134,16 @@ function navigate(page, params = {}) {
   state.params = params;
 
   const activeNav = SIDEBAR_MAP[page] ?? page;
+  const activeBottomNav = BOTTOM_NAV_MAP[page] ?? page;
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.page === activeNav));
+  document.querySelectorAll('.bottom-nav-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.page === activeBottomNav));
 
   const main = document.getElementById('main');
   switch (page) {
     case 'dashboard':         main.innerHTML = renderDashboard(); break;
+    case 'inputs':            main.innerHTML = renderInputs(); break;
     case 'baselines':         main.innerHTML = renderBaselines(); break;
     case 'baseline-detail':   main.innerHTML = renderBaselineDetail(); break;
     case 'events':            main.innerHTML = renderEvents(); break;
@@ -160,7 +164,7 @@ function navigate(page, params = {}) {
 // ═══════════════════════════════════════════════════════════════
 
 function buildSidebar() {
-  const nav = [
+  const sidebarNav = [
     { page: 'dashboard',  icon: '⊞', label: 'Dashboard' },
     { page: 'baselines',  icon: '🏦', label: 'Baselines' },
     { page: 'events',     icon: '📅', label: 'Events' },
@@ -168,7 +172,14 @@ function buildSidebar() {
     { page: 'analysis',   icon: '📈', label: 'Analysis' },
     { page: 'settings',   icon: '⚙',  label: 'Settings' },
   ];
+  const bottomNav = [
+    { page: 'dashboard', icon: '⊞', label: 'Dashboard' },
+    { page: 'inputs',    icon: '📁', label: 'Inputs' },
+    { page: 'analysis',  icon: '📈', label: 'Analysis' },
+    { page: 'settings',  icon: '⚙',  label: 'Settings' },
+  ];
   const activeNav = SIDEBAR_MAP[state.page] ?? state.page;
+  const activeBottomNav = BOTTOM_NAV_MAP[state.page] ?? state.page;
 
   document.getElementById('sidebar').innerHTML = `
     <div class="sidebar-logo">
@@ -176,7 +187,7 @@ function buildSidebar() {
       <button class="help-btn" onclick="showHelpModal()" title="Help &amp; Documentation">?</button>
     </div>
     <nav class="sidebar-nav">
-      ${nav.map(({ page, icon, label }) => `
+      ${sidebarNav.map(({ page, icon, label }) => `
         <a class="nav-item${activeNav === page ? ' active' : ''}" data-page="${page}" onclick="navigate('${page}')">
           <span class="nav-icon">${icon}</span>${label}
         </a>`).join('')}
@@ -185,6 +196,13 @@ function buildSidebar() {
       <button class="btn btn-secondary btn-sm btn-full" onclick="exportData()">Export Data</button>
       <button class="btn btn-secondary btn-sm btn-full" onclick="triggerImport()">Import Data</button>
     </div>`;
+
+  document.getElementById('bottom-nav').innerHTML =
+    bottomNav.map(({ page, icon, label }) => `
+      <a class="bottom-nav-item${activeBottomNav === page ? ' active' : ''}" data-page="${page}" onclick="navigate('${page}')">
+        <span class="bottom-nav-icon">${icon}</span>
+        <span class="bottom-nav-label">${label}</span>
+      </a>`).join('');
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -622,3 +622,63 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color:
   .results-tabs { overflow-x: auto; flex-wrap: nowrap; }
   .results-tab-btn { white-space: nowrap; padding: 10px 14px; }
 }
+
+/* ── Inputs Hub ── */
+.inputs-hub { display: flex; flex-direction: column; gap: 12px; max-width: 600px; }
+
+.inputs-hub-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  box-shadow: var(--shadow);
+  user-select: none;
+}
+.inputs-hub-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(37,99,235,0.1); }
+
+.inputs-hub-icon { font-size: 26px; flex-shrink: 0; width: 40px; text-align: center; }
+
+.inputs-hub-body { flex: 1; min-width: 0; }
+.inputs-hub-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+.inputs-hub-desc { font-size: 13px; color: var(--muted); line-height: 1.4; }
+.inputs-hub-count { font-size: 12px; color: var(--accent); font-weight: 500; margin-top: 4px; }
+
+.inputs-hub-arrow { font-size: 22px; color: var(--muted); flex-shrink: 0; line-height: 1; }
+
+/* ── Bottom Nav (hidden by default; shown on mobile via responsive CSS) ── */
+#bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: calc(60px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  z-index: 200;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 3px;
+  cursor: pointer;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 8px 4px;
+  transition: color 0.1s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.bottom-nav-item:hover { color: var(--text); }
+.bottom-nav-item.active { color: var(--accent); }
+
+.bottom-nav-icon { font-size: 20px; line-height: 1; }
+.bottom-nav-label { font-size: 10px; font-weight: 500; }
