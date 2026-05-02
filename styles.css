@@ -581,10 +581,43 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color:
 }
 .results-tabs-scroll::-webkit-scrollbar { display: none; }
 
+/* ── Bottom Nav ── */
+#bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: calc(60px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  z-index: 200;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 3px;
+  cursor: pointer;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 8px 4px;
+  transition: color 0.1s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.bottom-nav-item:hover { color: var(--text); }
+.bottom-nav-item.active { color: var(--accent); }
+
+.bottom-nav-icon { font-size: 20px; line-height: 1; }
+.bottom-nav-label { font-size: 10px; font-weight: 500; }
+
 /* ── Responsive ── */
 
-/* Mobile (≤767px) */
-@media (max-width: 767px) {
+/* Mobile (≤768px) */
+@media (max-width: 768px) {
   #sidebar { display: none; }
   #bottom-nav { display: flex; }
 
@@ -668,36 +701,3 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color:
 .inputs-hub-count { font-size: 12px; color: var(--accent); font-weight: 500; margin-top: 4px; }
 
 .inputs-hub-arrow { font-size: 22px; color: var(--muted); flex-shrink: 0; line-height: 1; }
-
-/* ── Bottom Nav (hidden by default; shown on mobile via responsive CSS) ── */
-#bottom-nav {
-  display: none;
-  position: fixed;
-  bottom: 0; left: 0; right: 0;
-  height: calc(60px + env(safe-area-inset-bottom));
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  z-index: 200;
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-.bottom-nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  gap: 3px;
-  cursor: pointer;
-  color: var(--muted);
-  text-decoration: none;
-  padding: 8px 4px;
-  transition: color 0.1s;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-.bottom-nav-item:hover { color: var(--text); }
-.bottom-nav-item.active { color: var(--accent); }
-
-.bottom-nav-icon { font-size: 20px; line-height: 1; }
-.bottom-nav-label { font-size: 10px; font-weight: 500; }
