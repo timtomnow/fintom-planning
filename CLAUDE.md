@@ -550,6 +550,34 @@ BOTTOM_NAV_MAP        // maps any page → one of: dashboard | inputs | analysis
 
 ---
 
+## PWA & Responsive Design
+
+### Breakpoints
+
+| Range | Layout |
+|---|---|
+| ≥ 1024px | Desktop — full 224px sidebar (`--sidebar-w`), no bottom nav |
+| 768px – 1023px | Tablet — icon-only sidebar rail (`--sidebar-w: 52px`), labels hidden via `font-size: 0`, footer hidden |
+| ≤ 767px | Mobile — sidebar hidden, `#bottom-nav` shown as `display: flex` |
+
+### Bottom Nav
+
+`#bottom-nav` is a `<nav>` element in `index.html` (sibling of `#app`), populated by `buildSidebar()` in `js/ui.js` alongside the desktop sidebar. It contains 4 `.bottom-nav-item` elements (Dashboard, Inputs, Analysis, Settings). Active state is set in `navigate()` using `BOTTOM_NAV_MAP` from `js/data.js`, which maps every page to one of those 4 keys. Pages not in the map fall through to their own name via `BOTTOM_NAV_MAP[page] ?? page`.
+
+On mobile, `#main` gets `padding-bottom: calc(60px + env(safe-area-inset-bottom))` so content is never hidden behind the bar. `#toast-container` is raised by the same amount.
+
+### Service Worker
+
+`sw.js` uses a cache-first strategy. `CORE_ASSETS` are pre-cached on install and must all resolve (404 will fail the SW install). `OPTIONAL_ASSETS` (the four icon files) are cached with individual `catch(() => {})` so a missing icon doesn't block installation.
+
+**To pick up app file changes on installed clients:** bump `CACHE_VERSION` in `sw.js` (e.g. `fintom-v1` → `fintom-v2`). The `activate` handler deletes all caches whose key doesn't match the current version.
+
+### Icons
+
+Four PNG files in `icons/` are required for full PWA installability — see `icons/ICONS_NEEDED.md` for exact dimensions. Chrome will not show the install prompt until at least a 192×192 icon is present. The app runs fine without them; only installability is affected.
+
+---
+
 ## Syntax Check Policy
 
 After every edit to any JS file, visually verify the changed region before considering the task done. There is no build step, so a syntax error produces a blank page with no helpful output.

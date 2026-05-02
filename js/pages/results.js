@@ -1474,12 +1474,14 @@ function renderResults() {
     </div>
 
     <!-- Tab bar -->
-    <div class="results-tabs">
-      <button class="results-tab-btn${_resultsTab === 'overview' ? ' active' : ''}" data-tab="overview" onclick="switchResultsTab('overview')">Overview</button>
-      <button class="results-tab-btn${_resultsTab === 'events' ? ' active' : ''}" data-tab="events" onclick="switchResultsTab('events')">Event Details</button>
-      <button class="results-tab-btn${_resultsTab === 'balance-review' ? ' active' : ''}" data-tab="balance-review" onclick="switchResultsTab('balance-review')">Balance Review</button>
-      <button class="results-tab-btn${_resultsTab === 'baseline-values' ? ' active' : ''}" data-tab="baseline-values" onclick="switchResultsTab('baseline-values')">Baseline Values</button>
-      <button class="results-tab-btn${_resultsTab === 'analysis-config' ? ' active' : ''}" data-tab="analysis-config" onclick="switchResultsTab('analysis-config')">Analysis Config</button>
+    <div class="results-tabs-scroll">
+      <div class="results-tabs">
+        <button class="results-tab-btn${_resultsTab === 'overview' ? ' active' : ''}" data-tab="overview" onclick="switchResultsTab('overview')">Overview</button>
+        <button class="results-tab-btn${_resultsTab === 'events' ? ' active' : ''}" data-tab="events" onclick="switchResultsTab('events')">Event Details</button>
+        <button class="results-tab-btn${_resultsTab === 'balance-review' ? ' active' : ''}" data-tab="balance-review" onclick="switchResultsTab('balance-review')">Balance Review</button>
+        <button class="results-tab-btn${_resultsTab === 'baseline-values' ? ' active' : ''}" data-tab="baseline-values" onclick="switchResultsTab('baseline-values')">Baseline Values</button>
+        <button class="results-tab-btn${_resultsTab === 'analysis-config' ? ' active' : ''}" data-tab="analysis-config" onclick="switchResultsTab('analysis-config')">Analysis Config</button>
+      </div>
     </div>
 
     <!-- Tab 1: Overview -->
