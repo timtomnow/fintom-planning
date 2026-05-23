@@ -45,6 +45,9 @@ const BOTTOM_NAV_MAP = {
   'results':          'analysis',
 };
 
+// v1 platform — landing page key for the workflow surface
+const V1_LANDING_PAGE = 'v1-get-started';
+
 // ═══════════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════════
@@ -70,6 +73,7 @@ function defaultData() {
     eventSets: [],
     analysisConfigs: [],
     settings: { defaultInflationRate: 3, defaultTaxRate: 22 },
+    workflows: [],
   };
 }
 
@@ -162,6 +166,8 @@ function loadData() {
     state.data = parsed;
     // Migrate older saves that predate event sets
     state.data.eventSets = state.data.eventSets ?? [];
+    // Migrate older saves that predate the v1 workflow platform
+    state.data.workflows = state.data.workflows ?? [];
   } catch (e) {
     console.warn('FinTom: could not parse stored data — resetting to default', e);
     state.data = defaultData();
@@ -211,10 +217,11 @@ function triggerImport() {
         }
         state.data = parsed;
         state.data.eventSets = state.data.eventSets ?? [];
+        state.data.workflows = state.data.workflows ?? [];
         state.lastRun = null;
         state.lastRunConfig = null;
         saveData();
-        navigate('dashboard');
+        navigate(V1_LANDING_PAGE);
         showToast('Data imported', 'success');
       } catch {
         showToast('Invalid file — could not import', 'error');

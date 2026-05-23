@@ -133,6 +133,12 @@ function navigate(page, params = {}) {
   state.page = page;
   state.params = params;
 
+  const isV1 = page.startsWith('v1-');
+  document.body.classList.toggle('v1-mode', isV1);
+  // Scroll to top on every navigation so v1 sticky topbar starts clean.
+  window.scrollTo(0, 0);
+  document.getElementById('main')?.scrollTo?.(0, 0);
+
   const activeNav = SIDEBAR_MAP[page] ?? page;
   const activeBottomNav = BOTTOM_NAV_MAP[page] ?? page;
   document.querySelectorAll('.nav-item').forEach(el =>
@@ -155,6 +161,9 @@ function navigate(page, params = {}) {
       requestAnimationFrame(attachResultsCharts);
       break;
     case 'settings':          main.innerHTML = renderSettings(); break;
+    case 'v1-get-started':    main.innerHTML = renderV1GetStarted(); break;
+    case 'v1-workflow':       main.innerHTML = renderV1Workflow(); break;
+    case 'v1-history':        main.innerHTML = renderV1History(); break;
     default:                  main.innerHTML = renderDashboard();
   }
 }
@@ -191,6 +200,7 @@ function buildSidebar() {
         </a>`).join('')}
     </nav>
     <div class="sidebar-footer">
+      <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('${V1_LANDING_PAGE}')">← Get Started</button>
       <button class="btn btn-secondary btn-sm btn-full" onclick="exportData()">Export Data</button>
       <button class="btn btn-secondary btn-sm btn-full" onclick="triggerImport()">Import Data</button>
     </div>`;
@@ -210,5 +220,5 @@ function buildSidebar() {
 document.addEventListener('DOMContentLoaded', () => {
   loadData();
   buildSidebar();
-  navigate('dashboard');
+  navigate(V1_LANDING_PAGE);
 });
