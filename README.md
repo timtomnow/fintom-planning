@@ -42,6 +42,30 @@ Your data is saved automatically in the browser's **local storage** after every 
 
 ---
 
+## Get Started
+
+The first screen you'll see in FinTom is the **Get Started** page — a workflow launcher designed to take you from "nothing" to "a real forecast" in a few minutes. Each workflow is a guided, step-by-step path. You can exit any workflow at any point and resume from the same place later.
+
+### Available workflows
+
+- **Quick-start: Family with mortgage** — Generates a realistic two-income household scenario with a primary residence, an amortizing mortgage, mixed investment accounts (TFSA, RRSP), and typical monthly expenses. You review each generated record (and edit anything that doesn't fit your situation), name your scenario, run a 20-year forecast with Monte Carlo, and see a one-page summary of where your plan lands. Estimated time: about 5 minutes.
+
+### Saving your work
+
+- **Exit any time** — Click *Exit* in the workflow topbar. The workflow keeps your spot, your draft data, and any records it has already generated. It will appear in the **Resume** list on Get Started.
+- **Discard a workflow** — From the Resume card, *Discard* removes the in-progress workflow **and** every record it created. Useful if you want to start over from scratch.
+- **History** — Completed workflows appear under **Admin → History**. Click any entry to reopen it at its final step, including the summary chart and the "Generate Report" button.
+
+### Generate Report
+
+The summary step of any workflow includes a **Generate Report** button. It opens your browser's print dialog with FinTom's chrome hidden and the summary content laid out for print. Choose "Save as PDF" in the print dialog to produce a PDF report titled with your scenario name.
+
+### The advanced view
+
+The full legacy app — direct access to Baselines, Events, Event Sets, and Analysis Configurations — is always available from **Get Started → Admin → Open advanced view**. Workflows generate records into the same data model the advanced view edits, so you can always switch between guided and direct editing.
+
+---
+
 ## Features
 
 ### Baselines

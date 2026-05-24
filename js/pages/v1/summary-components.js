@@ -118,15 +118,22 @@ function attachSummaryCharts(components) {
 // The browser's "Save as PDF" produces an actual PDF file.
 // Future iterations can swap this for jsPDF without changing the
 // component API.
+//
+// `title` is set as document.title during print so it becomes the
+// default PDF filename and the print-dialog header.
 // ═══════════════════════════════════════════════════════════════
 
-function generateSummaryReport() {
+function generateSummaryReport(title) {
+  const originalTitle = document.title;
+  if (title) document.title = title;
+
   // The summary content is already rendered inside .v1-summary-zone.
   // Print-mode CSS hides everything else and removes workflow chrome.
   document.body.classList.add('v1-print-mode');
 
   const cleanup = () => {
     document.body.classList.remove('v1-print-mode');
+    document.title = originalTitle;
     window.removeEventListener('afterprint', cleanup);
   };
   window.addEventListener('afterprint', cleanup);

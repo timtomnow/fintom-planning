@@ -64,6 +64,15 @@ function fmtPct(n) { return `${(n ?? 0).toFixed(2)}%`; }
 
 function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
+// Return `base` if not in `takenList`, else `base (2)`, `base (3)`, etc.
+function uniqueName(base, takenList) {
+  const taken = new Set(takenList);
+  if (!taken.has(base)) return base;
+  let i = 2;
+  while (taken.has(`${base} (${i})`)) i++;
+  return `${base} (${i})`;
+}
+
 function esc(str) {
   return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');

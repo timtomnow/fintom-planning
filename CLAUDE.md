@@ -21,6 +21,12 @@ This is a self-contained, single-page financial planning app. No framework, no b
 | `js/pages/analysis.js` | renderAnalysis, openConfigModal, toggleMCFields, deleteConfig, resolveEventSets, resolveEffectiveEvents, getEventsForPeriod, runAndView. |
 | `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, _cmpEvTableData, renderEventsTableSection, etc.), tab state (_resultsTab, _brSelectedItem, _brChart, _overviewScenario, _evTableScenario) + functions (switchResultsTab, switchOverviewScenario, switchEvTableScenario, renderBalanceReviewContent, attachBalanceReviewChart, onBrItemChange, renderBaselineValuesContent, renderAnalysisConfigContent), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt, updateBaselineCmpValuesAt. |
 | `js/pages/settings.js` | renderSettings, saveSettings, confirmClear. |
+| `js/pages/v1/shell.js` | renderV1Shell — sticky topbar + actionbar chrome wrapped around every workflow step body. |
+| `js/pages/v1/summary-components.js` | renderSummaryComponents, renderSC_* (per component type), attachSummaryCharts, generateSummaryReport. Reusable summary primitives shared across workflows. |
+| `js/pages/v1/workflows.js` | V1_WORKFLOWS registry, registerV1Workflow, getV1WorkflowInstance/Definition, lifecycle (startV1Workflow, resumeV1Workflow, advanceV1Workflow, goBackV1Workflow, exitV1Workflow, discardV1Workflow, deleteV1WorkflowRecord, rollbackProducedRecords), renderV1Workflow. Also registers the `demo-2step` admin workflow. |
+| `js/pages/v1/workflow-quickstart-family.js` | quickstart-family workflow (5 steps): qsfSelectPath, qsfSelectSample, qsfRenameScenario, qsfGenerateRecords, qsfRunForecastAndAdvance, qsfBuildSummaryComponents, qsfAttachSummary, qsfGenerateReport, and the render*/attach* per-step functions. |
+| `js/pages/v1/get-started.js` | renderV1GetStarted, listV1Workflows, renderWorkflowCard, renderResumeCard, renderEmptyStateCards. |
+| `js/pages/v1/history.js` | renderV1History, renderHistoryCard. |
 | `README.md` | End-user instructions (Markdown). |
 
 ### Script load order in index.html
@@ -28,10 +34,14 @@ This is a self-contained, single-page financial planning app. No framework, no b
 ```
 js/utils.js → js/data.js → js/engine.js → js/ui.js →
 js/pages/dashboard.js → js/pages/baselines.js → js/pages/events.js →
-js/pages/inputs.js → js/pages/analysis.js → js/pages/results.js → js/pages/settings.js
+js/pages/inputs.js → js/pages/analysis.js → js/pages/results.js → js/pages/settings.js →
+js/pages/v1/shell.js → js/pages/v1/summary-components.js → js/pages/v1/workflows.js →
+js/pages/v1/workflow-quickstart-family.js → js/pages/v1/get-started.js → js/pages/v1/history.js
 ```
 
 All files use global scope (no ES modules). Order enforces dependencies. `file://` compatible.
+
+The v1 platform files depend on legacy ones (engine, ui, baselines/events modals reused for Review-step editing), so they load after the legacy pages. Within the v1 group, `workflows.js` defines the registry, then individual workflow files load and self-register, then `get-started.js` consumes the registry.
 
 ---
 
@@ -54,7 +64,7 @@ const state = {
 
 `state.data` is loaded from `localStorage` on init and saved (`saveData()`) after every mutation.
 
-`state.lastRun` / `state.lastRunConfig` are in-memory only. Navigating away from results and back requires re-running the analysis.
+`state.lastRun` / `state.lastRunConfig` are in-memory only. Navigating away from results and back requires re-running the analysis. Workflow Summary steps that depend on these (e.g. the quick-start family workflow) detect a missing cached run on render and re-execute the forecast automatically — see § v1 Workflow Platform.
 
 ### Navigation
 
@@ -68,6 +78,8 @@ Sub-pages that don't have their own sidebar item are mapped in `SIDEBAR_MAP`:
 - `'baseline-detail'` highlights `'baselines'`
 - `'event-set-detail'` highlights `'event-sets'`
 - `'results'` highlights `'analysis'`
+
+Any page key starting with `'v1-'` toggles `document.body.classList` to include `v1-mode`, which hides the desktop sidebar, the mobile bottom nav, and the legacy chrome via CSS in `styles.css`. The default landing page on init is `V1_LANDING_PAGE` (= `'v1-get-started'`). The legacy pages are still fully accessible via the v1 surface's "Open advanced view" Admin card and via Edit buttons on individual records (which open legacy modals inside the v1 chrome — see § v1 Workflow Platform → Modal reuse).
 
 ---
 
@@ -85,10 +97,13 @@ All data lives in `state.data` and is saved as a single JSON blob to `localStora
   eventSets: EventSet[],
   analysisConfigs: AnalysisConfig[],
   settings: { defaultInflationRate: 3, defaultTaxRate: 22 },
+  workflows: Workflow[],  // v1 workflow platform — see § v1 Workflow Platform
 }
 ```
 
-Older saves without `eventSets` are migrated on load: `state.data.eventSets = state.data.eventSets ?? []`.
+Older saves are migrated on load:
+- `state.data.eventSets = state.data.eventSets ?? []` (predates event sets)
+- `state.data.workflows = state.data.workflows ?? []` (predates the v1 workflow platform)
 
 ### Baseline
 
@@ -469,6 +484,182 @@ Starting/ending balances come directly from `assetSnapshots` / `liabSnapshots` /
 
 ---
 
+## v1 Workflow Platform
+
+A guided, task-oriented surface that sits alongside the legacy app and is the default landing experience for new users. Each workflow is a small state machine: an ordered set of steps where each step renders its own UI and decides where to advance next. Workflows can create records (baselines, events, event sets, analysis configs), run forecasts, and present results — all without leaving a consistent topbar / actionbar shell.
+
+The legacy app is never hidden; it's reachable from the Admin section of Get Started and via Edit buttons inside the Review step (which open the existing legacy modals — see § Modal reuse below).
+
+### Routing & body mode
+
+Three page keys make up the v1 surface:
+
+- `'v1-get-started'` — landing page (cards for available workflows, in-progress Resume list, Admin section). `V1_LANDING_PAGE` constant.
+- `'v1-workflow'` — the step shell. Requires `state.params.workflowId`.
+- `'v1-history'` — completed workflows.
+
+`navigate()` toggles `document.body.classList` to include `v1-mode` whenever `state.page.startsWith('v1-')`. The `body.v1-mode` selector in `styles.css` hides `#sidebar` and `#bottom-nav` (display: none) and clears their reserved space so the v1 shell can take the full viewport.
+
+### Workflow definition shape
+
+A workflow is a plain object registered via `registerV1Workflow(def)`. Shape:
+
+```js
+{
+  id:               string,                            // matches the registry key
+  title:            string,
+  description:      string,                            // one-line shown on cards
+  icon:             string,                            // emoji
+  estimatedTime:    string,                            // e.g. '5 min'
+  category:         'main' | 'admin',                  // drives Get Started placement
+  eligible:         (data) => boolean,                 // gates visibility on state.data
+  initialStepKey:   string,
+  initialDraft:     () => object,
+  steps: {
+    [stepKey]: {
+      key:              string,
+      title:            string,
+      render:           (wf) => htmlString,
+      onContinue:       (wf) => { ok: boolean, nextStepKey?: string, errors?: string[] },
+      postRender:       (wf) => void,                  // optional; rAF after DOM insert
+      previousStepKey:  string | null,
+      continueLabel:    string,                        // optional
+      backLabel:        string,                        // optional
+    },
+  },
+}
+```
+
+`onContinue` return contract:
+- `{ ok: true, nextStepKey: '<key>' }` — advance to that step.
+- `{ ok: true, nextStepKey: 'complete' }` — mark workflow complete (`completedAt` set), navigate to landing.
+- `{ ok: false, errors: [...] }` — show error toasts, stay on the step.
+- Falsy (`undefined`, `{ ok: false }` with no errors) — silently no-op. Used by **async steps** that schedule their own `navigate()` call (e.g. the family workflow's `confirm-run` step kicks off a Monte Carlo run via `setTimeout`, then advances itself when results land).
+
+`postRender(wf)` is called via `requestAnimationFrame` after the step's HTML is inserted. It's where Chart.js (or any DOM-dependent setup) is wired up. The runtime guards against late-firing callbacks by re-checking `currentStep === stepDef.key` before invoking.
+
+### Workflow instance shape
+
+Persisted under `state.data.workflows`. One entry per started workflow run:
+
+```js
+{
+  id:                  uuid,
+  type:                string,                // matches a registered workflow id
+  currentStep:         string,                // the step key the user is on
+  draftData:           object,                // workflow-defined scratch space (e.g. selections)
+  startedAt:           ISO string,
+  updatedAt:           ISO string,
+  completedAt:         ISO string | null,
+  producedRecordIds: {
+    baselineIds:        string[],
+    eventIds:           string[],
+    eventSetIds:        string[],
+    analysisConfigIds:  string[],
+  },
+}
+```
+
+`producedRecordIds` is the rollback ledger. Whenever a workflow generates a record in `state.data`, the ID is pushed here. `discardV1Workflow` reads this and removes those records (and cleans references from any event sets / analysis configs that point at them). `completedAt` being non-null means the workflow is done — it's hidden from the Resume list but appears in History.
+
+Once `completedAt` is set, `advanceV1Workflow` preserves the original timestamp on subsequent finishes (e.g. user reopens from History and clicks Finish again).
+
+### Lifecycle API
+
+All exported from `js/pages/v1/workflows.js`:
+
+| Function | What it does |
+|---|---|
+| `registerV1Workflow(def)` | Add a workflow definition to the registry. Called at module load by each workflow file. |
+| `getV1WorkflowDefinition(type)` | Lookup by type (registry key). |
+| `getV1WorkflowInstance(id)` | Find a persisted instance in `state.data.workflows`. |
+| `startV1Workflow(type)` | Create a new instance with `initialDraft()`, `currentStep = initialStepKey`, push to `state.data.workflows`, `navigate('v1-workflow', { workflowId })`. |
+| `resumeV1Workflow(id)` | Navigate to a workflow at its current step. Used by Resume cards AND by clickable History cards (completed workflows resume at their final step). |
+| `advanceV1Workflow()` | Read `state.params.workflowId`, run the current step's `onContinue`, handle the return contract. |
+| `goBackV1Workflow()` | Navigate to `previousStepKey` (null = no-op). |
+| `exitV1Workflow()` | Navigate to landing without changing workflow state — the instance keeps `completedAt: null` and surfaces in Resume. |
+| `discardV1Workflow(id)` | Confirm + rollback `producedRecordIds` + remove the instance. |
+| `deleteV1WorkflowRecord(id)` | History-only "Remove" action — drops the instance but preserves the records it created. |
+| `rollbackProducedRecords(wf)` | Internal helper; filters `state.data.{baselines,events,eventSets,analysisConfigs}` to drop the workflow's records and cleans cross-references. |
+| `renderV1Workflow()` | The render entry called by `navigate()` for `'v1-workflow'`. Looks up wf + def + step, schedules `postRender` if defined, wraps `step.render(wf)` in `renderV1Shell(...)`. |
+
+### Shell
+
+`renderV1Shell({ definition, stepDef, stepIndex, totalSteps, bodyHtml })` from `js/pages/v1/shell.js` wraps every step body with:
+- Sticky topbar — workflow title + "Step N of M" + Exit button.
+- The step body (`v1-body`) — scrollable middle.
+- Sticky actionbar — Back (if `previousStepKey`) + Continue (uses `stepDef.continueLabel` or 'Continue').
+
+The shell has no knowledge of any specific workflow — it just renders the chrome. All page-specific markup comes from `stepDef.render(wf)`.
+
+### Summary components
+
+Workflows that need to show results render them as a **list of component descriptors**, not custom HTML per step. This guarantees the same content can be reused in the future "Generate Report" pipeline (currently `window.print`, future jsPDF) without each workflow re-implementing layout for both screen and print.
+
+Component types (in `js/pages/v1/summary-components.js`):
+
+| Type | Shape | Notes |
+|---|---|---|
+| `narrative`    | `{ type, html }` | Paragraph. `html` is rendered as-is — callers must `esc()` any user content. |
+| `kpi-grid`     | `{ type, items: [{ label, value, sublabel? }] }` | Auto-fitting row of stat cards. |
+| `chart`        | `{ type, id, title?, config, height? }` | `id` must be unique on the page; `config` is a Chart.js config passed straight to `makeChart`. |
+| `data-section` | `{ type, title, rows: [{ label, value }] }` | Label/value list under a heading. Useful for "Scenario inputs", "Records used", etc. |
+
+API:
+
+| Function | What it does |
+|---|---|
+| `renderSummaryComponents(components)` | Returns HTML for an array of components. |
+| `attachSummaryCharts(components)` | Iterates components and calls `makeChart(id, config)` for each `chart` component. Call via `postRender`. |
+| `generateSummaryReport(title)` | Toggles `body.v1-print-mode`, sets `document.title` to `title` so it becomes the default PDF filename + print-dialog header, calls `window.print()`, restores both on `afterprint`. |
+
+To add a new component type: add the case in `renderSummaryComponent`, an entry in this table, and a `.v1-summary-*` CSS block in `styles.css`. Print-mode behavior under `@media print` should be checked too — anything with a background, border, or fixed height needs explicit print rules to render usably.
+
+### Modal reuse (legacy edit from inside a workflow)
+
+The Review step's Edit / Delete buttons call existing legacy functions directly (`openAssetModal`, `openLiabilityModal`, `openEventModal`, `deleteAsset`, `deleteLiability`, `deleteEvent`). The save / delete handlers in `baselines.js` and `events.js` end with:
+
+```js
+if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+else navigate('baseline-detail', { id: baselineId }); // or 'events', etc.
+```
+
+So when the same modal is opened from a v1 workflow, the post-save navigation re-renders the workflow page instead of jumping to the legacy detail page. No modal duplication; the existing UI (with its full validation, asset routing fields, mortgage amortization fields, etc.) just works inside the workflow surface.
+
+### Print mode (Generate Report)
+
+A summary step that calls `generateSummaryReport(title)` triggers a temporary CSS state via `body.v1-print-mode` + `@media print` rules in `styles.css`:
+- Workflow topbar, actionbar, summary CTA row, sidebar, bottom nav, modal overlay, and toast container are hidden.
+- The v1-shell becomes block-flow with no max-width.
+- KPI cards, chart panels, and data sections get page-break-inside: avoid.
+- Chart canvases are clamped to ~280px so they don't overflow a printed page.
+
+The browser's print dialog handles the actual PDF generation via "Save as PDF" — no client-side PDF library is bundled. If we want richer / templated PDFs later, swap the implementation of `generateSummaryReport` for jsPDF; the workflow code (which just passes a `title`) stays unchanged.
+
+### Adding a new workflow
+
+1. Create `js/pages/v1/workflow-<name>.js`.
+2. Define helper functions for selection handlers, record generation, and any per-step rendering or post-render hooks. Conventional naming: prefix with a short tag (e.g. `qsf` for quickstart-family) to keep globals separated.
+3. Call `registerV1Workflow({ id, title, description, icon, estimatedTime, category, eligible, initialStepKey, initialDraft, steps: { … } })` at module load.
+4. Inside record-generation, push every created ID to `wf.producedRecordIds.*` so discard rolls back cleanly.
+5. Use `uniqueName(base, takenList)` (in `js/utils.js`) when generating record names so re-running the workflow doesn't collide.
+6. If a step renders a summary, build a component list with the primitives above and use `postRender: (wf) => attachSummaryCharts(buildComponents(wf))` to attach Chart.js instances.
+7. Add a `<script src="js/pages/v1/workflow-<name>.js"></script>` tag to `index.html` between `workflows.js` and `get-started.js`.
+
+### Quick-start family workflow (reference implementation)
+
+`js/pages/v1/workflow-quickstart-family.js` registers `id: 'quickstart-family'` with five steps:
+
+1. `choose-path` — "Use a sample scenario" vs. "Start from scratch" (disabled placeholder for a future questionnaire workflow).
+2. `pick-sample` — single sample for now ("Family with mortgage"). On Continue, calls idempotent `qsfGenerateRecords(wf)`: pushes 1 baseline (5 assets + 1 amortizing mortgage with `paymentMode: 'calculated'`, `termStartDate`, `termEndDate`, `renewalRate`), 11 recurring events (income x2, recurring expenses, two transfer events for TFSA / RRSP contributions), 1 event set, 1 analysis config (20yr horizon, MC on, 500 simulations). All names go through `uniqueName(...)` so re-running yields `Family with Mortgage Plan (2)`, `20-Year Family Plan (2)`, etc.
+3. `review` — Editable scenario-name input at top (writes to `cfg.name` on blur via `qsfRenameScenario`); Assets / Liabilities / Events sections with Edit + Delete using the legacy modals.
+4. `confirm-run` — On Continue, calls `qsfRunForecastAndAdvance(wf, 'summary')` which runs `runDeterministicForecast` synchronously, then schedules `runMonteCarloForecast` via `setTimeout` so the "Running N simulations…" toast paints first. The async callback caches results in `state.lastRun` / `state.lastRunConfig`, updates `wf.currentStep = 'summary'`, and navigates. The `onContinue` returns `{ ok: false }` so the runtime doesn't try to advance synchronously.
+5. `summary` — Builds the component list via `qsfBuildSummaryComponents(wf)`: narrative paragraph, KPI grid (current NW, projected median NW at year 20, p10–p90 range, mortgage payoff month), 20-year Chart.js line chart (deterministic line + MC bands), data-section listing scenario inputs. CTAs: **Generate Report** (calls `qsfGenerateReport(wf.id)` which passes `cfg.name` as the PDF title), **Explore full analysis** (navigates to legacy results page with the cached run).
+
+The summary step also handles a **stale-cache fallback**: if `state.lastRun` is missing or doesn't match the workflow's analysis config (e.g. user resumed from History after a browser refresh), the render returns a "Re-running analysis…" placeholder and schedules `qsfRunForecastAndAdvance(wf, null)` to repopulate the cache + re-render. This is what makes History entries clickable — they reopen at the summary step and the cache fills itself.
+
+---
+
 ## UI Patterns
 
 ### Modals
@@ -546,6 +737,8 @@ LIABILITY_CATEGORIES  // array of strings
 EVENT_CATEGORIES      // array of strings
 SIDEBAR_MAP           // { 'baseline-detail': 'baselines', 'event-set-detail': 'event-sets', 'results': 'analysis' }
 BOTTOM_NAV_MAP        // maps any page → one of: dashboard | inputs | analysis | settings (mobile bottom nav active state)
+V1_LANDING_PAGE       // 'v1-get-started' — default landing page on app init
+V1_WORKFLOWS          // registry object — `registerV1Workflow(def)` populates it
 ```
 
 ---

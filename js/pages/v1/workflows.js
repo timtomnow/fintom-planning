@@ -107,7 +107,9 @@ function advanceV1Workflow() {
   wf.updatedAt = new Date().toISOString();
 
   if (result.nextStepKey === 'complete' || !result.nextStepKey) {
-    wf.completedAt = new Date().toISOString();
+    // Preserve the original completion time if the user reopens an
+    // already-completed workflow from History and finishes it again.
+    if (!wf.completedAt) wf.completedAt = new Date().toISOString();
     saveData();
     showToast('Workflow complete', 'success');
     navigate(V1_LANDING_PAGE);
