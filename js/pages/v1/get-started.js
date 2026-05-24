@@ -142,7 +142,9 @@ function renderResumeCard(wf) {
   const def = getV1WorkflowDefinition(wf.type);
   const title = def?.title || wf.type;
   const icon = def?.icon || '⏵';
-  const stepKeys = def ? Object.keys(def.steps) : [];
+  const stepKeys = def
+    ? (def.getStepSequence ? def.getStepSequence(wf) : Object.keys(def.steps))
+    : [];
   const stepIdx = stepKeys.indexOf(wf.currentStep);
   const totalSteps = stepKeys.length;
   const progress = (stepIdx >= 0 && totalSteps > 0)

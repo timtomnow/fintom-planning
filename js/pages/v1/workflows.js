@@ -15,6 +15,13 @@
 //   eligible:         (data) => bool — gates visibility based on state.data,
 //   initialStepKey:   string,
 //   initialDraft:     () => object,
+//   getStepSequence:  (wf) => string[]  — optional. Returns the ordered
+//                                 list of step keys for the current path,
+//                                 used to compute "Step N of M" in the
+//                                 topbar. Default: Object.keys(def.steps).
+//                                 Use this for branching workflows where
+//                                 the visible step count depends on draft
+//                                 state.
 //   steps: {
 //     [stepKey]: {
 //       key:              string,
@@ -29,7 +36,10 @@
 //                                 after the step's HTML is inserted into the DOM.
 //                                 Use this to attach Chart.js instances or other
 //                                 DOM-dependent setup.
-//       previousStepKey:  string | null,
+//       previousStepKey:  string | null | (wf) => string | null
+//                                 — static string for linear flows, or a
+//                                 function for branching flows where Back
+//                                 depends on the path taken.
 //       continueLabel:    string (optional),
 //       backLabel:        string (optional),
 //     },
@@ -131,7 +141,9 @@ function goBackV1Workflow() {
   if (!wf) return;
   const def = getV1WorkflowDefinition(wf.type);
   const stepDef = def?.steps[wf.currentStep];
-  const prev = stepDef?.previousStepKey;
+  const prev = typeof stepDef?.previousStepKey === 'function'
+    ? stepDef.previousStepKey(wf)
+    : stepDef?.previousStepKey;
   if (!prev) return;
   wf.currentStep = prev;
   wf.updatedAt = new Date().toISOString();
@@ -229,9 +241,9 @@ function renderV1Workflow() {
     </div>`;
   }
 
-  const stepKeys = Object.keys(def.steps);
-  const stepIndex = stepKeys.indexOf(stepDef.key);
-  const totalSteps = stepKeys.length;
+  const sequence = def.getStepSequence ? def.getStepSequence(wf) : Object.keys(def.steps);
+  const stepIndex = sequence.indexOf(stepDef.key);
+  const totalSteps = sequence.length;
 
   if (stepDef.postRender) {
     // Defer until after main.innerHTML has been assigned (this function's
