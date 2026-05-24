@@ -225,6 +225,19 @@ function openEventModal(id = null) {
       state.data.events[state.data.events.findIndex(e => e.id === id)] = updated;
     } else {
       state.data.events.push(updated);
+      // If this modal was opened from inside a v1 workflow, link the new
+      // event into the workflow's event set(s) so the forecast picks it up,
+      // and track it in producedRecordIds so discard rolls it back.
+      if (state.page === 'v1-workflow' && state.params.workflowId) {
+        const wf = state.data.workflows?.find(w => w.id === state.params.workflowId);
+        if (wf) {
+          wf.producedRecordIds?.eventIds?.push(updated.id);
+          (wf.producedRecordIds?.eventSetIds ?? []).forEach(esId => {
+            const es = state.data.eventSets.find(s => s.id === esId);
+            if (es && !es.eventIds.includes(updated.id)) es.eventIds.push(updated.id);
+          });
+        }
+      }
     }
     saveData();
     if (state.page.startsWith('v1-')) navigate(state.page, state.params);

@@ -474,17 +474,26 @@ function qsfRenderReview(wf) {
     </div>
 
     <div class="v1-review-section">
-      <div class="v1-review-section-header"><div class="v1-review-section-title">Assets</div></div>
+      <div class="v1-review-section-header">
+        <div class="v1-review-section-title">Assets</div>
+        <button class="btn btn-sm btn-secondary" onclick="openAssetModal('${esc(bl.id)}')">+ Add Asset</button>
+      </div>
       ${assets.length ? assets.map(renderAssetRow).join('') : '<div class="v1-review-empty">No assets.</div>'}
     </div>
 
     <div class="v1-review-section">
-      <div class="v1-review-section-header"><div class="v1-review-section-title">Liabilities</div></div>
+      <div class="v1-review-section-header">
+        <div class="v1-review-section-title">Liabilities</div>
+        <button class="btn btn-sm btn-secondary" onclick="openLiabilityModal('${esc(bl.id)}')">+ Add Liability</button>
+      </div>
       ${liabs.length ? liabs.map(renderLiabRow).join('') : '<div class="v1-review-empty">No liabilities.</div>'}
     </div>
 
     <div class="v1-review-section">
-      <div class="v1-review-section-header"><div class="v1-review-section-title">Events (${events.length})</div></div>
+      <div class="v1-review-section-header">
+        <div class="v1-review-section-title">Events (${events.length})</div>
+        <button class="btn btn-sm btn-secondary" onclick="openEventModal()">+ Add Event</button>
+      </div>
       ${events.length ? events.map(renderEvRow).join('') : '<div class="v1-review-empty">No events.</div>'}
     </div>
   `;
