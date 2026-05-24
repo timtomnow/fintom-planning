@@ -1160,6 +1160,118 @@ body.v1-mode #toast-container { bottom: 20px; }
   .v1-review-row-actions .btn { min-height: 40px; }
 }
 
+/* ───── v1 questionnaire forms ───── */
+.qsf-hint {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: -6px;
+  margin-bottom: 12px;
+}
+.qsf-section-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 18px 0 10px;
+}
+/* Topic checklist on q-topics */
+.qsf-topic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.qsf-topic-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.qsf-topic-row:hover { border-color: var(--accent); }
+.qsf-topic-row input[type=checkbox] {
+  margin-top: 2px;
+  flex-shrink: 0;
+  width: 18px; height: 18px;
+}
+.qsf-topic-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.qsf-topic-label { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.qsf-topic-desc  { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+/* Radio cards on q-housing */
+.qsf-radio-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.qsf-radio-card {
+  flex: 1 1 110px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  font-size: 14.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.qsf-radio-card:hover { border-color: var(--accent); }
+.qsf-radio-card.selected {
+  border-color: var(--accent);
+  background: rgba(37,99,235,0.06);
+}
+.qsf-radio-card input[type=radio] { display: none; }
+.qsf-housing-detail {
+  background: var(--bg-secondary);
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+/* Multi-row list builders (income / onetime / debts) */
+.qsf-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.qsf-list-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.qsf-list-row .form-group { flex: 1 1 130px; margin-bottom: 0; }
+.qsf-list-row .qsf-row-remove { flex-shrink: 0; margin-bottom: 2px; }
+/* Checkbox + amount rows (q-recurring, housing add-ons) */
+.qsf-checkamount-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.qsf-checkamount-row {
+  display: grid;
+  grid-template-columns: 1fr 130px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+}
+.qsf-checkamount-row .checkbox-label { margin: 0; }
+.qsf-checkamount-row input[type=number] { margin: 0; }
+
+@media (max-width: 600px) {
+  .qsf-list-row .form-group { flex: 1 1 100%; }
+  .qsf-checkamount-row { grid-template-columns: 1fr 110px; }
+  .qsf-radio-card { flex: 1 1 100%; }
+}
+
 /* ───── v1 print mode (Generate Report) ───── */
 /* When v1-print-mode is on the body, only the summary zone is shown.
    The browser's "Save as PDF" dialog produces an actual PDF file. */

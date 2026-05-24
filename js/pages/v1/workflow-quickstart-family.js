@@ -22,13 +22,30 @@
 // paths without discarding the workflow first.
 
 // ═══════════════════════════════════════════════════════════════
+// QUESTIONNAIRE — topic list
+// ═══════════════════════════════════════════════════════════════
+// The set of topics the user can opt in/out of on the q-topics step.
+// Order matters — it determines the order of subsequent questions.
+// Each topic has a key (used in step keys, e.g. 'q-income') and a
+// user-facing label + description shown on the q-topics checklist.
+
+const QSF_QUESTIONNAIRE_TOPICS = [
+  { key: 'income',    label: 'Income',                  desc: 'Salary, partner\'s salary, side income — including any future changes.' },
+  { key: 'savings',   label: 'Savings & investments',   desc: 'Cash, emergency fund, investment accounts, retirement accounts.' },
+  { key: 'housing',   label: 'Housing',                 desc: 'Rent or own — and related monthly expenses.' },
+  { key: 'recurring', label: 'Other recurring expenses', desc: 'Groceries, transportation, healthcare, entertainment, etc.' },
+  { key: 'onetime',   label: 'Upcoming one-time events', desc: 'Planned purchases, bonuses, gifts, or other one-off cash flows.' },
+  { key: 'debts',     label: 'Other debts',             desc: 'Auto loans, student loans, lines of credit (not the mortgage).' },
+];
+
+// ═══════════════════════════════════════════════════════════════
 // SELECTION HELPERS
 // ═══════════════════════════════════════════════════════════════
 
 function qsfSelectPath(workflowId, path) {
   const wf = getV1WorkflowInstance(workflowId);
   if (!wf) return;
-  if (path !== 'sample' && path !== 'scratch') return; // 'questionnaire' coming soon
+  if (path !== 'sample' && path !== 'scratch' && path !== 'questionnaire') return;
   // Once records are generated, the path is locked. Selecting a
   // different option from the chosen path is rejected with a toast.
   const locked = (wf.producedRecordIds?.baselineIds?.length ?? 0) > 0;
@@ -457,13 +474,13 @@ function qsfRenderChoosePath(wf) {
         </div>
         <div class="v1-option-check">${sel === 'scratch' ? '✓' : ''}</div>
       </div>
-      <div class="v1-option-card disabled" title="Coming soon">
+      <div class="${cardClass('questionnaire')}" ${clickAttr('questionnaire')}>
         <div class="v1-option-icon">📝</div>
         <div class="v1-option-body">
-          <div class="v1-option-title">Guided questionnaire<span class="v1-option-tag">Coming soon</span></div>
-          <div class="v1-option-desc">Answer a series of questions and we'll build the plan for you, one input at a time.</div>
+          <div class="v1-option-title">Guided questionnaire</div>
+          <div class="v1-option-desc">Answer a series of short questions about your income, savings, housing, and expenses — we'll build your plan from your answers.</div>
         </div>
-        <div class="v1-option-check"></div>
+        <div class="v1-option-check">${sel === 'questionnaire' ? '✓' : ''}</div>
       </div>
     </div>
   `;
@@ -637,6 +654,745 @@ function qsfAttachSummary(wf) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// QUESTIONNAIRE — helpers
+// ═══════════════════════════════════════════════════════════════
+// Each question step renders a form, captures values from the DOM on
+// Continue (and on Add/Remove for multi-row list builders), and stores
+// answers on wf.draftData.q.<topic>. Generation runs at the end and
+// converts answers into baseline + events + event set + analysis
+// config. All questions are skippable — empty forms produce no records.
+
+function qsfEnsureQDraft(wf) {
+  wf.draftData.q = wf.draftData.q ?? {};
+  return wf.draftData.q;
+}
+
+function qsfToggleTopic(workflowId, topicKey) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  const q = qsfEnsureQDraft(wf);
+  // Capture current checkbox states from DOM (not just the flipped one)
+  // so the user's other toggles survive the rerender.
+  const checked = QSF_QUESTIONNAIRE_TOPICS
+    .map(t => t.key)
+    .filter(k => document.getElementById(`qtopic-${k}`)?.checked);
+  q.topics = checked;
+  wf.updatedAt = new Date().toISOString();
+  saveData();
+  // No rerender — the checkboxes already reflect the DOM state and
+  // we don't need to mutate any HTML. We just persist the answer.
+}
+
+// ── Multi-row list capture helpers ──────────────────────────────────
+
+function qsfCaptureIncomeRows() {
+  const rows = [];
+  document.querySelectorAll('.qsf-income-row').forEach(rowEl => {
+    rows.push({
+      name:      rowEl.querySelector('[data-field=name]')?.value.trim() || '',
+      amount:    parseFloat(rowEl.querySelector('[data-field=amount]')?.value) || 0,
+      startDate: rowEl.querySelector('[data-field=startDate]')?.value || '',
+      endDate:   rowEl.querySelector('[data-field=endDate]')?.value || '',
+    });
+  });
+  return rows;
+}
+
+function qsfCaptureOnetimeRows() {
+  const rows = [];
+  document.querySelectorAll('.qsf-onetime-row').forEach(rowEl => {
+    rows.push({
+      name:   rowEl.querySelector('[data-field=name]')?.value.trim() || '',
+      date:   rowEl.querySelector('[data-field=date]')?.value || '',
+      amount: parseFloat(rowEl.querySelector('[data-field=amount]')?.value) || 0,
+      type:   rowEl.querySelector('[data-field=type]')?.value || 'one_time_outflow',
+    });
+  });
+  return rows;
+}
+
+function qsfCaptureDebtRows() {
+  const rows = [];
+  document.querySelectorAll('.qsf-debt-row').forEach(rowEl => {
+    rows.push({
+      name:        rowEl.querySelector('[data-field=name]')?.value.trim() || '',
+      balance:     parseFloat(rowEl.querySelector('[data-field=balance]')?.value) || 0,
+      rate:        parseFloat(rowEl.querySelector('[data-field=rate]')?.value) || 0,
+      payoffYear:  rowEl.querySelector('[data-field=payoffYear]')?.value || '',
+    });
+  });
+  return rows;
+}
+
+// ── Add / remove row handlers ───────────────────────────────────────
+
+function qsfAddIncomeRow(workflowId) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  const q = qsfEnsureQDraft(wf);
+  q.income = q.income || { streams: [] };
+  q.income.streams = qsfCaptureIncomeRows();
+  q.income.streams.push({ name: '', amount: 0, startDate: '', endDate: '' });
+  saveData();
+  navigate('v1-workflow', { workflowId });
+}
+function qsfRemoveIncomeRow(workflowId, idx) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  const q = qsfEnsureQDraft(wf);
+  q.income = q.income || { streams: [] };
+  q.income.streams = qsfCaptureIncomeRows();
+  q.income.streams.splice(idx, 1);
+  saveData();
+  navigate('v1-workflow', { workflowId });
+}
+
+function qsfAddOnetimeRow(workflowId) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  const q = qsfEnsureQDraft(wf);
+  q.onetime = q.onetime || { events: [] };
+  q.onetime.events = qsfCaptureOnetimeRows();
+  q.onetime.events.push({ name: '', date: today(), amount: 0, type: 'one_time_outflow' });
+  saveData();
+  navigate('v1-workflow', { workflowId });
+}
+function qsfRemoveOnetimeRow(workflowId, idx) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  const q = qsfEnsureQDraft(wf);
+  q.onetime = q.onetime || { events: [] };
+  q.onetime.events = qsfCaptureOnetimeRows();
+  q.onetime.events.splice(idx, 1);
+  saveData();
+  navigate('v1-workflow', { workflowId });
+}
+
+function qsfAddDebtRow(workflowId) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  const q = qsfEnsureQDraft(wf);
+  q.debts = q.debts || { items: [] };
+  q.debts.items = qsfCaptureDebtRows();
+  q.debts.items.push({ name: '', balance: 0, rate: 6, payoffYear: '' });
+  saveData();
+  navigate('v1-workflow', { workflowId });
+}
+function qsfRemoveDebtRow(workflowId, idx) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  const q = qsfEnsureQDraft(wf);
+  q.debts = q.debts || { items: [] };
+  q.debts.items = qsfCaptureDebtRows();
+  q.debts.items.splice(idx, 1);
+  saveData();
+  navigate('v1-workflow', { workflowId });
+}
+
+// ── Housing mode toggle ─────────────────────────────────────────────
+
+function qsfChangeHousingMode(workflowId, mode) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  const q = qsfEnsureQDraft(wf);
+  q.housing = qsfCaptureHousing(q.housing || qsfDefaultHousing());
+  q.housing.mode = mode;
+  saveData();
+  navigate('v1-workflow', { workflowId });
+}
+
+function qsfDefaultHousing() {
+  return {
+    mode: '',
+    rent: {
+      amount: 0,
+      addons: {
+        renterInsurance: { included: false, amount:  25 },
+        utilities:       { included: false, amount: 150 },
+        internet:        { included: false, amount:  60 },
+      },
+    },
+    own: {
+      value: 0,
+      mortgageBalance: 0,
+      mortgageRate: 5.0,
+      mortgageYear: '',
+      addons: {
+        propertyTax:   { included: false, amount: 500 },
+        homeInsurance: { included: false, amount: 120 },
+        utilities:     { included: false, amount: 200 },
+        internet:      { included: false, amount:  60 },
+        maintenance:   { included: false, amount: 200 },
+      },
+    },
+  };
+}
+
+function qsfCaptureHousing(prev) {
+  // Capture whatever is on screen now, falling back to prev for fields
+  // not currently rendered (e.g. rent fields when mode === 'own').
+  const out = JSON.parse(JSON.stringify(prev));
+  const modeEl = document.querySelector('input[name=qhousing-mode]:checked');
+  if (modeEl) out.mode = modeEl.value;
+
+  if (out.mode === 'rent') {
+    out.rent.amount = parseFloat(document.getElementById('qhousing-rent-amount')?.value) || 0;
+    for (const k of Object.keys(out.rent.addons)) {
+      out.rent.addons[k] = {
+        included: !!document.getElementById(`qhousing-rent-ck-${k}`)?.checked,
+        amount:   parseFloat(document.getElementById(`qhousing-rent-amt-${k}`)?.value) || 0,
+      };
+    }
+  } else if (out.mode === 'own') {
+    out.own.value           = parseFloat(document.getElementById('qhousing-own-value')?.value) || 0;
+    out.own.mortgageBalance = parseFloat(document.getElementById('qhousing-own-mtg-balance')?.value) || 0;
+    out.own.mortgageRate    = parseFloat(document.getElementById('qhousing-own-mtg-rate')?.value) || 0;
+    out.own.mortgageYear    = document.getElementById('qhousing-own-mtg-year')?.value || '';
+    for (const k of Object.keys(out.own.addons)) {
+      out.own.addons[k] = {
+        included: !!document.getElementById(`qhousing-own-ck-${k}`)?.checked,
+        amount:   parseFloat(document.getElementById(`qhousing-own-amt-${k}`)?.value) || 0,
+      };
+    }
+  }
+  return out;
+}
+
+// ── Recurring capture ───────────────────────────────────────────────
+
+const QSF_RECURRING_ITEMS = [
+  { key: 'groceries',      label: 'Groceries & food',     defaultAmount: 800, category: 'Food & Dining' },
+  { key: 'transportation', label: 'Transportation / auto', defaultAmount: 400, category: 'Transportation' },
+  { key: 'healthcare',     label: 'Healthcare',           defaultAmount: 150, category: 'Healthcare' },
+  { key: 'entertainment',  label: 'Entertainment & dining out', defaultAmount: 250, category: 'Entertainment' },
+  { key: 'insurance',      label: 'Insurance (non-housing)', defaultAmount: 100, category: 'Insurance' },
+  { key: 'childcare',      label: 'Childcare',            defaultAmount:   0, category: 'Childcare' },
+];
+
+function qsfDefaultRecurring() {
+  const out = {};
+  for (const it of QSF_RECURRING_ITEMS) out[it.key] = { included: false, amount: it.defaultAmount };
+  return out;
+}
+function qsfCaptureRecurring(prev) {
+  const out = JSON.parse(JSON.stringify(prev));
+  for (const it of QSF_RECURRING_ITEMS) {
+    out[it.key] = {
+      included: !!document.getElementById(`qrec-ck-${it.key}`)?.checked,
+      amount:   parseFloat(document.getElementById(`qrec-amt-${it.key}`)?.value) || 0,
+    };
+  }
+  return out;
+}
+
+// ── Savings capture ─────────────────────────────────────────────────
+
+function qsfDefaultSavings() {
+  return { chequing: 0, emergency: 0, investments: 0, retirement: 0 };
+}
+function qsfCaptureSavings() {
+  return {
+    chequing:    parseFloat(document.getElementById('qsav-chequing')?.value)    || 0,
+    emergency:   parseFloat(document.getElementById('qsav-emergency')?.value)   || 0,
+    investments: parseFloat(document.getElementById('qsav-investments')?.value) || 0,
+    retirement:  parseFloat(document.getElementById('qsav-retirement')?.value)  || 0,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// QUESTIONNAIRE — render functions
+// ═══════════════════════════════════════════════════════════════
+
+function qsfRenderQTopics(wf) {
+  const q = qsfEnsureQDraft(wf);
+  const checked = new Set(q.topics ?? QSF_QUESTIONNAIRE_TOPICS.map(t => t.key));
+  return `
+    <p>Pick the topics you want to cover. We'll only ask you about the ones you check. You can leave any field blank within a question to skip it.</p>
+    <div class="qsf-topic-list">
+      ${QSF_QUESTIONNAIRE_TOPICS.map(t => `
+        <label class="qsf-topic-row">
+          <input type="checkbox" id="qtopic-${esc(t.key)}" ${checked.has(t.key) ? 'checked' : ''}
+                 onchange="qsfToggleTopic('${esc(wf.id)}','${esc(t.key)}')">
+          <span class="qsf-topic-body">
+            <span class="qsf-topic-label">${esc(t.label)}</span>
+            <span class="qsf-topic-desc">${esc(t.desc)}</span>
+          </span>
+        </label>
+      `).join('')}
+    </div>
+  `;
+}
+
+function qsfRenderQIncome(wf) {
+  const q = qsfEnsureQDraft(wf);
+  q.income = q.income || { streams: [{ name: '', amount: 0, startDate: '', endDate: '' }] };
+  const rows = q.income.streams;
+  return `
+    <p>List each income stream you expect. If your income changes over time (e.g. salary now, lower retirement income later), add a separate row for each period with start and end dates.</p>
+    <p class="qsf-hint">Leave the list empty (or every row blank) to skip this section.</p>
+    <div class="qsf-list">
+      ${rows.map((r, i) => `
+        <div class="qsf-list-row qsf-income-row">
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" data-field="name" value="${esc(r.name || '')}" placeholder="e.g. Salary">
+          </div>
+          <div class="form-group">
+            <label>Monthly amount</label>
+            <input type="number" data-field="amount" value="${Number(r.amount) || 0}" min="0" step="100">
+          </div>
+          <div class="form-group">
+            <label>Start <span class="label-note">(optional)</span></label>
+            <input type="month" data-field="startDate" value="${esc(r.startDate || '')}">
+          </div>
+          <div class="form-group">
+            <label>End <span class="label-note">(blank = indefinite)</span></label>
+            <input type="month" data-field="endDate" value="${esc(r.endDate || '')}">
+          </div>
+          <button type="button" class="btn btn-sm btn-ghost qsf-row-remove"
+                  onclick="qsfRemoveIncomeRow('${esc(wf.id)}',${i})">Remove</button>
+        </div>
+      `).join('')}
+    </div>
+    <button type="button" class="btn btn-sm btn-secondary" onclick="qsfAddIncomeRow('${esc(wf.id)}')">+ Add another income stream</button>
+  `;
+}
+
+function qsfRenderQSavings(wf) {
+  const q = qsfEnsureQDraft(wf);
+  q.savings = q.savings || qsfDefaultSavings();
+  const s = q.savings;
+  return `
+    <p>What are your current account balances? Leave anything at $0 to skip it.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Chequing / cash</label>
+        <input type="number" id="qsav-chequing" value="${Number(s.chequing) || 0}" min="0" step="1000">
+      </div>
+      <div class="form-group">
+        <label>Emergency fund</label>
+        <input type="number" id="qsav-emergency" value="${Number(s.emergency) || 0}" min="0" step="1000">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Investment account <span class="label-note">(e.g. TFSA, brokerage)</span></label>
+        <input type="number" id="qsav-investments" value="${Number(s.investments) || 0}" min="0" step="1000">
+      </div>
+      <div class="form-group">
+        <label>Retirement account <span class="label-note">(e.g. RRSP, 401k)</span></label>
+        <input type="number" id="qsav-retirement" value="${Number(s.retirement) || 0}" min="0" step="1000">
+      </div>
+    </div>
+    <p class="qsf-hint">Investment & retirement accounts get an 8% / 7% mean return with Monte Carlo variability by default. You can tweak these on the Review step.</p>
+  `;
+}
+
+function qsfRenderQHousing(wf) {
+  const q = qsfEnsureQDraft(wf);
+  q.housing = q.housing || qsfDefaultHousing();
+  const h = q.housing;
+  const mode = h.mode || '';
+
+  const renderAddon = (groupPrefix, key, label, addon) => `
+    <div class="qsf-checkamount-row">
+      <label class="checkbox-label">
+        <input type="checkbox" id="qhousing-${groupPrefix}-ck-${key}" ${addon.included ? 'checked' : ''}>
+        ${esc(label)}
+      </label>
+      <input type="number" id="qhousing-${groupPrefix}-amt-${key}" value="${Number(addon.amount) || 0}" min="0" step="10" aria-label="${esc(label)} monthly amount">
+    </div>
+  `;
+
+  const rentBlock = `
+    <div class="qsf-housing-detail">
+      <div class="form-group">
+        <label>Monthly rent</label>
+        <input type="number" id="qhousing-rent-amount" value="${Number(h.rent.amount) || 0}" min="0" step="50">
+      </div>
+      <div class="qsf-section-heading">Common rental expenses (check to include)</div>
+      <div class="qsf-checkamount-list">
+        ${renderAddon('rent', 'renterInsurance', "Renter's insurance / mo", h.rent.addons.renterInsurance)}
+        ${renderAddon('rent', 'utilities',       'Utilities / mo',          h.rent.addons.utilities)}
+        ${renderAddon('rent', 'internet',        'Internet / mo',           h.rent.addons.internet)}
+      </div>
+    </div>
+  `;
+
+  const ownBlock = `
+    <div class="qsf-housing-detail">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Home value</label>
+          <input type="number" id="qhousing-own-value" value="${Number(h.own.value) || 0}" min="0" step="10000">
+        </div>
+        <div class="form-group">
+          <label>Mortgage balance <span class="label-note">(0 if paid off)</span></label>
+          <input type="number" id="qhousing-own-mtg-balance" value="${Number(h.own.mortgageBalance) || 0}" min="0" step="10000">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Mortgage annual rate %</label>
+          <input type="number" id="qhousing-own-mtg-rate" value="${Number(h.own.mortgageRate) || 0}" min="0" step="0.05">
+        </div>
+        <div class="form-group">
+          <label>Mortgage payoff month</label>
+          <input type="month" id="qhousing-own-mtg-year" value="${esc(h.own.mortgageYear || '')}">
+        </div>
+      </div>
+      <div class="qsf-section-heading">Common ownership expenses (check to include)</div>
+      <div class="qsf-checkamount-list">
+        ${renderAddon('own', 'propertyTax',   'Property tax / mo',  h.own.addons.propertyTax)}
+        ${renderAddon('own', 'homeInsurance', 'Home insurance / mo', h.own.addons.homeInsurance)}
+        ${renderAddon('own', 'utilities',     'Utilities / mo',      h.own.addons.utilities)}
+        ${renderAddon('own', 'internet',      'Internet / mo',       h.own.addons.internet)}
+        ${renderAddon('own', 'maintenance',   'Home maintenance / mo', h.own.addons.maintenance)}
+      </div>
+    </div>
+  `;
+
+  return `
+    <p>Do you rent or own your home? Pick one to see the relevant fields, or skip if you'd prefer to add housing later.</p>
+    <div class="qsf-radio-row">
+      <label class="qsf-radio-card${mode === 'rent' ? ' selected' : ''}">
+        <input type="radio" name="qhousing-mode" value="rent" ${mode === 'rent' ? 'checked' : ''}
+               onchange="qsfChangeHousingMode('${esc(wf.id)}','rent')">
+        <span>🏘️ Rent</span>
+      </label>
+      <label class="qsf-radio-card${mode === 'own' ? ' selected' : ''}">
+        <input type="radio" name="qhousing-mode" value="own" ${mode === 'own' ? 'checked' : ''}
+               onchange="qsfChangeHousingMode('${esc(wf.id)}','own')">
+        <span>🏡 Own</span>
+      </label>
+      <label class="qsf-radio-card${mode === 'skip' ? ' selected' : ''}">
+        <input type="radio" name="qhousing-mode" value="skip" ${mode === 'skip' ? 'checked' : ''}
+               onchange="qsfChangeHousingMode('${esc(wf.id)}','skip')">
+        <span>⏭️ Skip</span>
+      </label>
+    </div>
+    ${mode === 'rent' ? rentBlock : ''}
+    ${mode === 'own' ? ownBlock : ''}
+  `;
+}
+
+function qsfRenderQRecurring(wf) {
+  const q = qsfEnsureQDraft(wf);
+  q.recurring = q.recurring || qsfDefaultRecurring();
+  const r = q.recurring;
+  return `
+    <p>Check each common expense you want to include. The amounts are typical starting points — edit any to fit your situation.</p>
+    <div class="qsf-checkamount-list">
+      ${QSF_RECURRING_ITEMS.map(it => {
+        const v = r[it.key] || { included: false, amount: it.defaultAmount };
+        return `
+          <div class="qsf-checkamount-row">
+            <label class="checkbox-label">
+              <input type="checkbox" id="qrec-ck-${esc(it.key)}" ${v.included ? 'checked' : ''}>
+              ${esc(it.label)} <span class="label-note">/ mo</span>
+            </label>
+            <input type="number" id="qrec-amt-${esc(it.key)}" value="${Number(v.amount) || 0}" min="0" step="25" aria-label="${esc(it.label)} amount">
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function qsfRenderQOnetime(wf) {
+  const q = qsfEnsureQDraft(wf);
+  q.onetime = q.onetime || { events: [] };
+  const rows = q.onetime.events;
+  return `
+    <p>Add any one-time cash flows you expect in the future — purchases, bonuses, gifts, anything that's not a recurring monthly event.</p>
+    <p class="qsf-hint">Leave the list empty to skip this section.</p>
+    <div class="qsf-list">
+      ${rows.map((r, i) => `
+        <div class="qsf-list-row qsf-onetime-row">
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" data-field="name" value="${esc(r.name || '')}" placeholder="e.g. New car, Annual bonus">
+          </div>
+          <div class="form-group">
+            <label>Date</label>
+            <input type="month" data-field="date" value="${esc(r.date || '')}">
+          </div>
+          <div class="form-group">
+            <label>Amount</label>
+            <input type="number" data-field="amount" value="${Number(r.amount) || 0}" min="0" step="100">
+          </div>
+          <div class="form-group">
+            <label>Direction</label>
+            <select data-field="type">
+              <option value="one_time_outflow" ${r.type === 'one_time_outflow' ? 'selected' : ''}>Money out (purchase)</option>
+              <option value="one_time_inflow"  ${r.type === 'one_time_inflow'  ? 'selected' : ''}>Money in (windfall)</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-sm btn-ghost qsf-row-remove"
+                  onclick="qsfRemoveOnetimeRow('${esc(wf.id)}',${i})">Remove</button>
+        </div>
+      `).join('')}
+    </div>
+    <button type="button" class="btn btn-sm btn-secondary" onclick="qsfAddOnetimeRow('${esc(wf.id)}')">+ Add event</button>
+  `;
+}
+
+function qsfRenderQDebts(wf) {
+  const q = qsfEnsureQDraft(wf);
+  q.debts = q.debts || { items: [] };
+  const rows = q.debts.items;
+  return `
+    <p>Add any other amortizing debts — auto loans, student loans, lines of credit. The mortgage is handled in the Housing question.</p>
+    <p class="qsf-hint">Leave the list empty to skip this section.</p>
+    <div class="qsf-list">
+      ${rows.map((r, i) => `
+        <div class="qsf-list-row qsf-debt-row">
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" data-field="name" value="${esc(r.name || '')}" placeholder="e.g. Car loan">
+          </div>
+          <div class="form-group">
+            <label>Current balance</label>
+            <input type="number" data-field="balance" value="${Number(r.balance) || 0}" min="0" step="100">
+          </div>
+          <div class="form-group">
+            <label>Annual rate %</label>
+            <input type="number" data-field="rate" value="${Number(r.rate) || 0}" min="0" step="0.1">
+          </div>
+          <div class="form-group">
+            <label>Payoff month</label>
+            <input type="month" data-field="payoffYear" value="${esc(r.payoffYear || '')}">
+          </div>
+          <button type="button" class="btn btn-sm btn-ghost qsf-row-remove"
+                  onclick="qsfRemoveDebtRow('${esc(wf.id)}',${i})">Remove</button>
+        </div>
+      `).join('')}
+    </div>
+    <button type="button" class="btn btn-sm btn-secondary" onclick="qsfAddDebtRow('${esc(wf.id)}')">+ Add debt</button>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// QUESTIONNAIRE — generation
+// ═══════════════════════════════════════════════════════════════
+// Converts wf.draftData.q into actual baseline + events + event set
+// + analysis config. Idempotent: skips if records already exist.
+
+function qsfGenerateQuestionnaireRecords(wf) {
+  if (wf.producedRecordIds.baselineIds.length > 0) return;
+
+  const start = today();
+  const q = wf.draftData.q ?? {};
+
+  // ── Baseline ─────────────────────────────────────────────────
+  const bl = {
+    id: uuid(),
+    name: uniqueName('Questionnaire Plan', state.data.baselines.map(b => b.name)),
+    description: 'Generated by the 20-year basic outlook workflow (guided questionnaire).',
+    date: start,
+    createdAt: new Date().toISOString(),
+    assets: [],
+    liabilities: [],
+  };
+
+  // Savings → assets
+  const sav = q.savings ?? {};
+  const chequingName = (sav.chequing > 0) ? 'Chequing & Cash' : '';
+  if (sav.chequing > 0)    bl.assets.push({ id: uuid(), name: chequingName,           value: sav.chequing,    category: 'Bank Account',       isInvestment: false, isLiquid: true,  monthlyGrowthRate: 0,    annualMeanReturn: 7, annualStdDev: 15 });
+  if (sav.emergency > 0)   bl.assets.push({ id: uuid(), name: 'Emergency Fund',       value: sav.emergency,   category: 'Bank Account',       isInvestment: false, isLiquid: true,  monthlyGrowthRate: 0.35, annualMeanReturn: 7, annualStdDev: 15 });
+  if (sav.investments > 0) bl.assets.push({ id: uuid(), name: 'Investment Account',   value: sav.investments, category: 'Investment Account', isInvestment: true,  isLiquid: true,  monthlyGrowthRate: 0,    annualMeanReturn: 8, annualStdDev: 14 });
+  if (sav.retirement > 0)  bl.assets.push({ id: uuid(), name: 'Retirement Account',   value: sav.retirement,  category: 'Investment Account', isInvestment: true,  isLiquid: false, monthlyGrowthRate: 0,    annualMeanReturn: 7, annualStdDev: 12 });
+
+  // Housing (own) → real estate asset + mortgage liability
+  const h = q.housing ?? {};
+  if (h.mode === 'own' && (h.own?.value > 0 || h.own?.mortgageBalance > 0)) {
+    if (h.own.value > 0) {
+      bl.assets.push({ id: uuid(), name: 'Primary Residence', value: h.own.value, category: 'Real Estate', isInvestment: false, isLiquid: false, monthlyGrowthRate: 0.33, annualMeanReturn: 7, annualStdDev: 15 });
+    }
+    if (h.own.mortgageBalance > 0 && h.own.mortgageYear) {
+      bl.liabilities.push({
+        id: uuid(), name: 'Primary Mortgage', value: h.own.mortgageBalance, category: 'Mortgage',
+        annualInterestRate: h.own.mortgageRate || 5,
+        useAmortization: true, monthlyPayment: 0,
+        includeInLiquidNW: false,
+        paymentAssetName: chequingName,
+        paymentMode: 'calculated', paymentFrequency: 'monthly',
+        amortizationEndDate: h.own.mortgageYear,
+        termStartDate: start,
+        termEndDate: '',
+        renewalRate: 0,
+      });
+    }
+  }
+
+  // Other debts → amortizing liabilities
+  for (const d of (q.debts?.items ?? [])) {
+    if (!d.name || d.balance <= 0 || !d.payoffYear) continue;
+    bl.liabilities.push({
+      id: uuid(), name: d.name, value: d.balance, category: 'Personal Loan',
+      annualInterestRate: d.rate || 0,
+      useAmortization: true, monthlyPayment: 0,
+      includeInLiquidNW: true,
+      paymentAssetName: chequingName,
+      paymentMode: 'calculated', paymentFrequency: 'monthly',
+      amortizationEndDate: d.payoffYear,
+      termStartDate: start,
+      termEndDate: '',
+      renewalRate: 0,
+    });
+  }
+
+  state.data.baselines.push(bl);
+  wf.producedRecordIds.baselineIds.push(bl.id);
+
+  // ── Events ───────────────────────────────────────────────────
+  const newEventIds = [];
+  const pushEvent = (ev) => {
+    state.data.events.push(ev);
+    wf.producedRecordIds.eventIds.push(ev.id);
+    newEventIds.push(ev.id);
+  };
+
+  // Income streams
+  for (const s of (q.income?.streams ?? [])) {
+    if (!s.name || s.amount <= 0) continue;
+    pushEvent({
+      id: uuid(), name: s.name, notes: '',
+      category: 'Income', type: 'income',
+      amount: s.amount, stdDevAmount: 0,
+      isRecurring: true,
+      startDate: s.startDate || start,
+      endDate:   s.endDate   || '',
+      inflationAdjusted: true,
+      depositToAssetName: chequingName,
+      payFromAssetName: '', linkedAssetName: '', linkedLiabilityName: '',
+    });
+  }
+
+  // Housing addons (rent or own)
+  const housingExpense = (name, amount, category) => pushEvent({
+    id: uuid(), name, notes: '',
+    category, type: 'expense',
+    amount, stdDevAmount: 0,
+    isRecurring: true,
+    startDate: start, endDate: '',
+    inflationAdjusted: true,
+    depositToAssetName: '', payFromAssetName: chequingName,
+    linkedAssetName: '', linkedLiabilityName: '',
+  });
+
+  if (h.mode === 'rent') {
+    if (h.rent?.amount > 0) housingExpense('Rent', h.rent.amount, 'Housing');
+    const ra = h.rent?.addons ?? {};
+    if (ra.renterInsurance?.included && ra.renterInsurance.amount > 0) housingExpense("Renter's insurance", ra.renterInsurance.amount, 'Insurance');
+    if (ra.utilities?.included       && ra.utilities.amount > 0)       housingExpense('Utilities',           ra.utilities.amount,       'Utilities');
+    if (ra.internet?.included        && ra.internet.amount > 0)        housingExpense('Internet',            ra.internet.amount,        'Utilities');
+  } else if (h.mode === 'own') {
+    const oa = h.own?.addons ?? {};
+    if (oa.propertyTax?.included   && oa.propertyTax.amount > 0)   housingExpense('Property taxes',  oa.propertyTax.amount,   'Housing');
+    if (oa.homeInsurance?.included && oa.homeInsurance.amount > 0) housingExpense('Home insurance',  oa.homeInsurance.amount, 'Insurance');
+    if (oa.utilities?.included     && oa.utilities.amount > 0)     housingExpense('Utilities',       oa.utilities.amount,     'Utilities');
+    if (oa.internet?.included      && oa.internet.amount > 0)      housingExpense('Internet',        oa.internet.amount,      'Utilities');
+    if (oa.maintenance?.included   && oa.maintenance.amount > 0)   housingExpense('Home maintenance', oa.maintenance.amount,  'Housing');
+  }
+
+  // Recurring expenses
+  const r = q.recurring ?? {};
+  for (const it of QSF_RECURRING_ITEMS) {
+    const v = r[it.key];
+    if (v?.included && v.amount > 0) {
+      pushEvent({
+        id: uuid(), name: it.label, notes: '',
+        category: it.category, type: 'expense',
+        amount: v.amount, stdDevAmount: 0,
+        isRecurring: true,
+        startDate: start, endDate: '',
+        inflationAdjusted: true,
+        depositToAssetName: '', payFromAssetName: chequingName,
+        linkedAssetName: '', linkedLiabilityName: '',
+      });
+    }
+  }
+
+  // One-time events
+  for (const e of (q.onetime?.events ?? [])) {
+    if (!e.name || !e.date || e.amount <= 0) continue;
+    const isInflow = e.type === 'one_time_inflow';
+    pushEvent({
+      id: uuid(), name: e.name, notes: '',
+      category: isInflow ? 'Income' : 'Other',
+      type: e.type, amount: e.amount, stdDevAmount: 0,
+      isRecurring: false,
+      startDate: e.date, endDate: '',
+      inflationAdjusted: false,
+      depositToAssetName: isInflow  ? chequingName : '',
+      payFromAssetName:   !isInflow ? chequingName : '',
+      linkedAssetName: '', linkedLiabilityName: '',
+    });
+  }
+
+  // ── Event Set ────────────────────────────────────────────────
+  const es = {
+    id: uuid(),
+    name: uniqueName('Questionnaire Plan Events', state.data.eventSets.map(s => s.name)),
+    description: 'Events from the 20-year basic outlook guided questionnaire.',
+    eventIds: newEventIds,
+  };
+  state.data.eventSets.push(es);
+  wf.producedRecordIds.eventSetIds.push(es.id);
+
+  // ── Analysis Config ──────────────────────────────────────────
+  const cfg = {
+    id: uuid(),
+    name: uniqueName('20-Year Questionnaire Plan', state.data.analysisConfigs.map(c => c.name)),
+    scenarioTitle: '', compareScenarioTitle: '',
+    baselineId: bl.id, compareBaselineId: '',
+    eventSetIds: [es.id], compareEventSetIds: [],
+    startDate: start,
+    endDate: addMonths(start, 240),
+    viewMode: 'yearly',
+    inflationRate: state.data.settings?.defaultInflationRate ?? 3,
+    taxRate:       state.data.settings?.defaultTaxRate ?? 30,
+    monteCarlo: { enabled: true, numSimulations: 500, standardOfLivingMonthly: 7000 },
+    eventOverrides: [],
+    resultsStale: false,
+  };
+  state.data.analysisConfigs.push(cfg);
+  wf.producedRecordIds.analysisConfigIds.push(cfg.id);
+
+  wf.updatedAt = new Date().toISOString();
+  saveData();
+}
+
+// ── Sequence navigation helpers ─────────────────────────────────────
+// Used by question steps to compute their next / previous step from
+// the dynamic questionnaire sequence (depends on selected topics).
+
+function qsfNextQStep(wf, currentKey) {
+  const def = getV1WorkflowDefinition('quickstart-family');
+  const seq = def.getStepSequence(wf);
+  const idx = seq.indexOf(currentKey);
+  return (idx >= 0 && idx < seq.length - 1) ? seq[idx + 1] : 'review';
+}
+function qsfPrevQStep(wf, currentKey) {
+  const def = getV1WorkflowDefinition('quickstart-family');
+  const seq = def.getStepSequence(wf);
+  const idx = seq.indexOf(currentKey);
+  return (idx > 0) ? seq[idx - 1] : null;
+}
+
+// Generic onContinue body shared by the 4 simple capture-and-advance
+// question steps. Captures via `capture`, writes to draftData under
+// `topicKey`, advances; if next step is review, runs generation first.
+function qsfAdvanceQ(wf, currentKey, topicKey, capture) {
+  const q = qsfEnsureQDraft(wf);
+  if (capture) q[topicKey] = capture(q[topicKey]);
+  const next = qsfNextQStep(wf, currentKey);
+  if (next === 'review') qsfGenerateQuestionnaireRecords(wf);
+  return { ok: true, nextStepKey: next };
+}
+
+// ═══════════════════════════════════════════════════════════════
 // REGISTRATION
 // ═══════════════════════════════════════════════════════════════
 
@@ -650,12 +1406,21 @@ registerV1Workflow({
   eligible: () => true,
   initialStepKey: 'choose-path',
   initialDraft: () => ({ path: null, sampleId: null }),
-  // Branching: scratch path skips pick-sample, sample path includes it.
-  // Before path is selected, default to the longer (sample) sequence so
-  // the "Step 1 of N" indicator gives a reasonable upper bound.
+  // Branching:
+  //   sample path        → choose-path → pick-sample → review → confirm-run → summary
+  //   scratch path       → choose-path → review → confirm-run → summary
+  //   questionnaire path → choose-path → q-topics → [N selected topic Qs] → review → confirm-run → summary
+  // Before path is selected, default to the sample sequence as a reasonable upper bound.
   getStepSequence: (wf) => {
     const tail = ['review', 'confirm-run', 'summary'];
     if (wf.draftData.path === 'scratch') return ['choose-path', ...tail];
+    if (wf.draftData.path === 'questionnaire') {
+      const topics = wf.draftData.q?.topics ?? QSF_QUESTIONNAIRE_TOPICS.map(t => t.key);
+      const topicSteps = QSF_QUESTIONNAIRE_TOPICS
+        .filter(t => topics.includes(t.key))
+        .map(t => `q-${t.key}`);
+      return ['choose-path', 'q-topics', ...topicSteps, ...tail];
+    }
     return ['choose-path', 'pick-sample', ...tail];
   },
   steps: {
@@ -689,12 +1454,68 @@ registerV1Workflow({
       },
       previousStepKey: 'choose-path',
     },
+    // ── Questionnaire path steps ───────────────────────────────────
+    'q-topics': {
+      key: 'q-topics',
+      title: 'Which topics do you want to answer?',
+      render: qsfRenderQTopics,
+      onContinue: (wf) => qsfAdvanceQ(wf, 'q-topics', null, null),
+      previousStepKey: 'choose-path',
+    },
+    'q-income': {
+      key: 'q-income',
+      title: 'Income',
+      render: qsfRenderQIncome,
+      onContinue: (wf) => qsfAdvanceQ(wf, 'q-income', 'income',
+        () => ({ streams: qsfCaptureIncomeRows() })),
+      previousStepKey: (wf) => qsfPrevQStep(wf, 'q-income'),
+    },
+    'q-savings': {
+      key: 'q-savings',
+      title: 'Savings & investments',
+      render: qsfRenderQSavings,
+      onContinue: (wf) => qsfAdvanceQ(wf, 'q-savings', 'savings',
+        () => qsfCaptureSavings()),
+      previousStepKey: (wf) => qsfPrevQStep(wf, 'q-savings'),
+    },
+    'q-housing': {
+      key: 'q-housing',
+      title: 'Housing',
+      render: qsfRenderQHousing,
+      onContinue: (wf) => qsfAdvanceQ(wf, 'q-housing', 'housing',
+        (prev) => qsfCaptureHousing(prev || qsfDefaultHousing())),
+      previousStepKey: (wf) => qsfPrevQStep(wf, 'q-housing'),
+    },
+    'q-recurring': {
+      key: 'q-recurring',
+      title: 'Recurring expenses',
+      render: qsfRenderQRecurring,
+      onContinue: (wf) => qsfAdvanceQ(wf, 'q-recurring', 'recurring',
+        (prev) => qsfCaptureRecurring(prev || qsfDefaultRecurring())),
+      previousStepKey: (wf) => qsfPrevQStep(wf, 'q-recurring'),
+    },
+    'q-onetime': {
+      key: 'q-onetime',
+      title: 'Upcoming one-time events',
+      render: qsfRenderQOnetime,
+      onContinue: (wf) => qsfAdvanceQ(wf, 'q-onetime', 'onetime',
+        () => ({ events: qsfCaptureOnetimeRows() })),
+      previousStepKey: (wf) => qsfPrevQStep(wf, 'q-onetime'),
+    },
+    'q-debts': {
+      key: 'q-debts',
+      title: 'Other debts',
+      render: qsfRenderQDebts,
+      onContinue: (wf) => qsfAdvanceQ(wf, 'q-debts', 'debts',
+        () => ({ items: qsfCaptureDebtRows() })),
+      previousStepKey: (wf) => qsfPrevQStep(wf, 'q-debts'),
+    },
     'review': {
       key: 'review',
       title: 'Review your starting records',
       render: qsfRenderReview,
       onContinue: () => ({ ok: true, nextStepKey: 'confirm-run' }),
-      previousStepKey: (wf) => wf.draftData.path === 'scratch' ? 'choose-path' : 'pick-sample',
+      previousStepKey: (wf) => qsfPrevQStep(wf, 'review'),
       continueLabel: 'Looks good — continue',
     },
     'confirm-run': {
