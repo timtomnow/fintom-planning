@@ -1,7 +1,7 @@
 'use strict';
 
 // Bump this string whenever app files change to invalidate the old cache.
-const CACHE_VERSION = 'fintom-v2';
+const CACHE_VERSION = 'fintom-v3';
 
 const CORE_ASSETS = [
   './',
@@ -21,7 +21,9 @@ const CORE_ASSETS = [
   './js/pages/results.js',
   './js/pages/settings.js',
   './js/pages/v1/shell.js',
+  './js/pages/v1/summary-components.js',
   './js/pages/v1/workflows.js',
+  './js/pages/v1/workflow-quickstart-family.js',
   './js/pages/v1/get-started.js',
   './js/pages/v1/history.js',
   './js/vendor/chart.umd.min.js',
