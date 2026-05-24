@@ -415,7 +415,7 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color:
 /* ── Toast ── */
 #toast-container {
   position: fixed;
-  bottom: 20px;
+  top: 20px;
   right: 20px;
   z-index: 2000;
   display: flex;
@@ -435,7 +435,7 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color:
 }
 .toast.error   { background: var(--danger); }
 .toast.success { background: var(--success); }
-@keyframes toastIn { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes toastIn { from { transform: translateY(-12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
 /* ── Badge / Tag ── */
 .badge {
@@ -625,8 +625,6 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color:
 
   #main { overflow-y: visible; padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
 
-  #toast-container { bottom: calc(80px + env(safe-area-inset-bottom)); }
-
   .page { padding: 16px; }
 
   .page-header { flex-direction: column; align-items: flex-start; gap: 10px; }
@@ -727,7 +725,9 @@ body.v1-mode #main {
   flex-direction: column;
 }
 
-body.v1-mode #toast-container { bottom: 20px; }
+/* In v1-mode the sticky topbar (~50px desktop, ~46px mobile) sits at top:0;
+   push toasts below it so they don't cover the Exit button. */
+body.v1-mode #toast-container { top: 70px; }
 
 /* v1 landing pages (Get Started, History) */
 .v1-page {
