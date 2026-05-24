@@ -1,7 +1,7 @@
 'use strict';
 
 // Bump this string whenever app files change to invalidate the old cache.
-const CACHE_VERSION = 'fintom-v3';
+const CACHE_VERSION = 'fintom-v4';
 
 const CORE_ASSETS = [
   './',
