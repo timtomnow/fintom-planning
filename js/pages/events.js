@@ -227,7 +227,8 @@ function openEventModal(id = null) {
       state.data.events.push(updated);
     }
     saveData();
-    navigate('events', state.params);
+    if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+    else navigate('events', state.params);
     showToast(existing ? 'Event updated' : 'Event added', 'success');
     return true;
   });
@@ -268,7 +269,8 @@ function deleteEvent(id) {
       es.eventIds = (es.eventIds ?? []).filter(eid => eid !== id);
     }
     saveData();
-    navigate('events', state.params);
+    if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+    else navigate('events', state.params);
     showToast('Event deleted');
   });
 }

@@ -22,6 +22,13 @@
 //       render:           (wf) => htmlString,
 //       onContinue:       (wf) => { ok: bool, nextStepKey?: string, errors?: string[] },
 //                                 nextStepKey === 'complete' marks the workflow done.
+//                                 Returning falsy (undefined / { ok:false }) silently
+//                                 stops the runtime's transition — useful for async
+//                                 steps that schedule their own navigate() call.
+//       postRender:       (wf) => void  — optional. Called via requestAnimationFrame
+//                                 after the step's HTML is inserted into the DOM.
+//                                 Use this to attach Chart.js instances or other
+//                                 DOM-dependent setup.
 //       previousStepKey:  string | null,
 //       continueLabel:    string (optional),
 //       backLabel:        string (optional),
@@ -223,6 +230,15 @@ function renderV1Workflow() {
   const stepKeys = Object.keys(def.steps);
   const stepIndex = stepKeys.indexOf(stepDef.key);
   const totalSteps = stepKeys.length;
+
+  if (stepDef.postRender) {
+    // Defer until after main.innerHTML has been assigned (this function's
+    // return value is what gets written). Same pattern as attachResultsCharts.
+    requestAnimationFrame(() => {
+      const cur = getV1WorkflowInstance(wf.id);
+      if (cur && cur.currentStep === stepDef.key) stepDef.postRender(cur);
+    });
+  }
 
   return renderV1Shell({
     definition: def,

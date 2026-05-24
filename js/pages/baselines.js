@@ -94,7 +94,8 @@ function openBaselineModal(id = null) {
       });
     }
     saveData();
-    navigate('baselines');
+    if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+    else navigate('baselines');
     showToast(bl ? 'Baseline updated' : 'Baseline created', 'success');
     return true;
   });
@@ -111,7 +112,8 @@ function duplicateBaseline(id) {
   (copy.liabilities ?? []).forEach(l => { l.id = uuid(); });
   state.data.baselines.push(copy);
   saveData();
-  navigate('baselines');
+  if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+  else navigate('baselines');
   showToast('Baseline duplicated', 'success');
 }
 
@@ -120,7 +122,8 @@ function deleteBaseline(id) {
   showConfirm('Delete Baseline', `Delete "${bl?.name}"? This cannot be undone.`, () => {
     state.data.baselines = state.data.baselines.filter(b => b.id !== id);
     saveData();
-    navigate('baselines');
+    if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+    else navigate('baselines');
     showToast('Baseline deleted');
   });
 }
@@ -334,7 +337,8 @@ function openAssetModal(baselineId, assetId = null) {
       bl.assets.push(updated);
     }
     saveData();
-    navigate('baseline-detail', { id: baselineId });
+    if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+    else navigate('baseline-detail', { id: baselineId });
     showToast(existing ? 'Asset updated' : 'Asset added', 'success');
     return true;
   });
@@ -352,7 +356,8 @@ function deleteAsset(baselineId, assetId) {
   showConfirm('Delete Asset', `Delete "${a?.name}"?`, () => {
     bl.assets = bl.assets.filter(a => a.id !== assetId);
     saveData();
-    navigate('baseline-detail', { id: baselineId });
+    if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+    else navigate('baseline-detail', { id: baselineId });
     showToast('Asset deleted');
   });
 }
@@ -494,7 +499,8 @@ function openLiabilityModal(baselineId, liabilityId = null) {
       bl.liabilities.push(updated);
     }
     saveData();
-    navigate('baseline-detail', { id: baselineId });
+    if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+    else navigate('baseline-detail', { id: baselineId });
     showToast(existing ? 'Liability updated' : 'Liability added', 'success');
     return true;
   });
@@ -521,7 +527,8 @@ function deleteLiability(baselineId, liabilityId) {
   showConfirm('Delete Liability', `Delete "${l?.name}"?`, () => {
     bl.liabilities = bl.liabilities.filter(l => l.id !== liabilityId);
     saveData();
-    navigate('baseline-detail', { id: baselineId });
+    if (state.page.startsWith('v1-')) navigate(state.page, state.params);
+    else navigate('baseline-detail', { id: baselineId });
     showToast('Liability deleted');
   });
 }
