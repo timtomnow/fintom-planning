@@ -29,13 +29,23 @@
 // Each topic has a key (used in step keys, e.g. 'q-income') and a
 // user-facing label + description shown on the q-topics checklist.
 
+// Order matters in two ways:
+//   1. Assets & liabilities come BEFORE events. Events can reference
+//      assets (depositToAssetName, payFromAssetName, linkedAssetName)
+//      and liabilities (linkedLiabilityName), so those records need
+//      to exist by the time the user is filling in events.
+//   2. 'assumptions' is first so the rates the user picks here become
+//      the defaults baked into every asset/liability/event below.
 const QSF_QUESTIONNAIRE_TOPICS = [
-  { key: 'income',    label: 'Income',                  desc: 'Salary, partner\'s salary, side income — including any future changes.' },
-  { key: 'savings',   label: 'Savings & investments',   desc: 'Cash, emergency fund, investment accounts, retirement accounts.' },
-  { key: 'housing',   label: 'Housing',                 desc: 'Rent or own — and related monthly expenses.' },
-  { key: 'recurring', label: 'Other recurring expenses', desc: 'Groceries, transportation, healthcare, entertainment, etc.' },
-  { key: 'onetime',   label: 'Upcoming one-time events', desc: 'Planned purchases, bonuses, gifts, or other one-off cash flows.' },
-  { key: 'debts',     label: 'Other debts',             desc: 'Auto loans, student loans, lines of credit (not the mortgage).' },
+  { key: 'assumptions', label: 'Assumptions',              desc: 'Default rates: inflation, income tax, asset growth, investment return & volatility.' },
+  // Assets & liabilities
+  { key: 'savings',     label: 'Savings & investments',    desc: 'Cash, emergency fund, investment accounts, retirement accounts.' },
+  { key: 'housing',     label: 'Housing',                  desc: 'Rent or own — and related monthly expenses.' },
+  { key: 'debts',       label: 'Other debts',              desc: 'Auto loans, student loans, lines of credit (not the mortgage).' },
+  // Events (referenced after assets/liabilities are defined)
+  { key: 'income',      label: 'Income',                   desc: 'Salary, partner\'s salary, side income — including any future changes.' },
+  { key: 'recurring',   label: 'Other recurring expenses', desc: 'Groceries, transportation, healthcare, entertainment, etc.' },
+  { key: 'onetime',     label: 'Upcoming one-time events', desc: 'Planned purchases, bonuses, gifts, or other one-off cash flows.' },
 ];
 
 // ═══════════════════════════════════════════════════════════════
@@ -885,6 +895,27 @@ function qsfCaptureRecurring(prev) {
   return out;
 }
 
+// ── Assumptions capture ─────────────────────────────────────────────
+
+function qsfDefaultAssumptions() {
+  return {
+    inflationRate:    state.data.settings?.defaultInflationRate ?? 3,
+    taxRate:          state.data.settings?.defaultTaxRate ?? 30,
+    assetGrowthRate:  4.0,
+    investmentReturn: 7.5,
+    investmentStdDev: 13.0,
+  };
+}
+function qsfCaptureAssumptions() {
+  return {
+    inflationRate:    parseFloat(document.getElementById('qassum-inflation')?.value)   || 0,
+    taxRate:          parseFloat(document.getElementById('qassum-tax')?.value)         || 0,
+    assetGrowthRate:  parseFloat(document.getElementById('qassum-asset-rate')?.value)  || 0,
+    investmentReturn: parseFloat(document.getElementById('qassum-inv-return')?.value)  || 0,
+    investmentStdDev: parseFloat(document.getElementById('qassum-inv-stddev')?.value)  || 0,
+  };
+}
+
 // ── Savings capture ─────────────────────────────────────────────────
 
 function qsfDefaultSavings() {
@@ -919,6 +950,44 @@ function qsfRenderQTopics(wf) {
           </span>
         </label>
       `).join('')}
+    </div>
+  `;
+}
+
+function qsfRenderQAssumptions(wf) {
+  const q = qsfEnsureQDraft(wf);
+  q.assumptions = q.assumptions || qsfDefaultAssumptions();
+  const a = q.assumptions;
+  return `
+    <p>These default rates are applied throughout your forecast. You can fine-tune them later on individual records, but starting with realistic numbers here saves time.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Inflation rate <span class="label-note">(% / year)</span></label>
+        <input type="number" id="qassum-inflation" value="${Number(a.inflationRate) || 0}" min="0" step="0.1">
+        <div class="form-hint">Inflates recurring income and expenses each year.</div>
+      </div>
+      <div class="form-group">
+        <label>Income tax rate <span class="label-note">(%)</span></label>
+        <input type="number" id="qassum-tax" value="${Number(a.taxRate) || 0}" min="0" step="0.5">
+        <div class="form-hint">Applied to income events. Set to 0% if you're entering after-tax income amounts — often the preferred approach.</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Default growth rate for interest-bearing assets <span class="label-note">(% / year)</span></label>
+      <input type="number" id="qassum-asset-rate" value="${Number(a.assetGrowthRate) || 0}" min="0" step="0.1">
+      <div class="form-hint">Used for non-investment accounts like an emergency fund. Chequing / cash stays at 0%.</div>
+    </div>
+    <div class="qsf-section-heading">Investment assets (TFSA, RRSP, brokerage)</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Default mean return <span class="label-note">(% / year)</span></label>
+        <input type="number" id="qassum-inv-return" value="${Number(a.investmentReturn) || 0}" min="0" step="0.1">
+      </div>
+      <div class="form-group">
+        <label>Default standard deviation <span class="label-note">(% / year)</span></label>
+        <input type="number" id="qassum-inv-stddev" value="${Number(a.investmentStdDev) || 0}" min="0" step="0.1">
+        <div class="form-hint">Drives Monte Carlo variability — higher = wider range of outcomes.</div>
+      </div>
     </div>
   `;
 }
@@ -984,7 +1053,7 @@ function qsfRenderQSavings(wf) {
         <input type="number" id="qsav-retirement" value="${Number(s.retirement) || 0}" min="0" step="1000">
       </div>
     </div>
-    <p class="qsf-hint">Investment & retirement accounts get an 8% / 7% mean return with Monte Carlo variability by default. You can tweak these on the Review step.</p>
+    <p class="qsf-hint">Investment & retirement account returns are driven by the defaults you set in the Assumptions step. You can tweak any account individually on the Review step.</p>
   `;
 }
 
@@ -1183,6 +1252,10 @@ function qsfGenerateQuestionnaireRecords(wf) {
 
   const start = today();
   const q = wf.draftData.q ?? {};
+  const assum = q.assumptions ?? qsfDefaultAssumptions();
+  const interestMonthly = (assum.assetGrowthRate || 0) / 12;
+  const invReturn = assum.investmentReturn || 0;
+  const invStdDev = assum.investmentStdDev || 0;
 
   // ── Baseline ─────────────────────────────────────────────────
   const bl = {
@@ -1198,16 +1271,16 @@ function qsfGenerateQuestionnaireRecords(wf) {
   // Savings → assets
   const sav = q.savings ?? {};
   const chequingName = (sav.chequing > 0) ? 'Chequing & Cash' : '';
-  if (sav.chequing > 0)    bl.assets.push({ id: uuid(), name: chequingName,           value: sav.chequing,    category: 'Bank Account',       isInvestment: false, isLiquid: true,  monthlyGrowthRate: 0,    annualMeanReturn: 7, annualStdDev: 15 });
-  if (sav.emergency > 0)   bl.assets.push({ id: uuid(), name: 'Emergency Fund',       value: sav.emergency,   category: 'Bank Account',       isInvestment: false, isLiquid: true,  monthlyGrowthRate: 0.35, annualMeanReturn: 7, annualStdDev: 15 });
-  if (sav.investments > 0) bl.assets.push({ id: uuid(), name: 'Investment Account',   value: sav.investments, category: 'Investment Account', isInvestment: true,  isLiquid: true,  monthlyGrowthRate: 0,    annualMeanReturn: 8, annualStdDev: 14 });
-  if (sav.retirement > 0)  bl.assets.push({ id: uuid(), name: 'Retirement Account',   value: sav.retirement,  category: 'Investment Account', isInvestment: true,  isLiquid: false, monthlyGrowthRate: 0,    annualMeanReturn: 7, annualStdDev: 12 });
+  if (sav.chequing > 0)    bl.assets.push({ id: uuid(), name: chequingName,         value: sav.chequing,    category: 'Bank Account',       isInvestment: false, isLiquid: true,  monthlyGrowthRate: 0,                annualMeanReturn: invReturn, annualStdDev: invStdDev });
+  if (sav.emergency > 0)   bl.assets.push({ id: uuid(), name: 'Emergency Fund',     value: sav.emergency,   category: 'Bank Account',       isInvestment: false, isLiquid: true,  monthlyGrowthRate: interestMonthly,  annualMeanReturn: invReturn, annualStdDev: invStdDev });
+  if (sav.investments > 0) bl.assets.push({ id: uuid(), name: 'Investment Account', value: sav.investments, category: 'Investment Account', isInvestment: true,  isLiquid: true,  monthlyGrowthRate: 0,                annualMeanReturn: invReturn, annualStdDev: invStdDev });
+  if (sav.retirement > 0)  bl.assets.push({ id: uuid(), name: 'Retirement Account', value: sav.retirement,  category: 'Investment Account', isInvestment: true,  isLiquid: false, monthlyGrowthRate: 0,                annualMeanReturn: invReturn, annualStdDev: invStdDev });
 
   // Housing (own) → real estate asset + mortgage liability
   const h = q.housing ?? {};
   if (h.mode === 'own' && (h.own?.value > 0 || h.own?.mortgageBalance > 0)) {
     if (h.own.value > 0) {
-      bl.assets.push({ id: uuid(), name: 'Primary Residence', value: h.own.value, category: 'Real Estate', isInvestment: false, isLiquid: false, monthlyGrowthRate: 0.33, annualMeanReturn: 7, annualStdDev: 15 });
+      bl.assets.push({ id: uuid(), name: 'Primary Residence', value: h.own.value, category: 'Real Estate', isInvestment: false, isLiquid: false, monthlyGrowthRate: interestMonthly, annualMeanReturn: invReturn, annualStdDev: invStdDev });
     }
     if (h.own.mortgageBalance > 0 && h.own.mortgageYear) {
       bl.liabilities.push({
@@ -1351,8 +1424,8 @@ function qsfGenerateQuestionnaireRecords(wf) {
     startDate: start,
     endDate: addMonths(start, 240),
     viewMode: 'yearly',
-    inflationRate: state.data.settings?.defaultInflationRate ?? 3,
-    taxRate:       state.data.settings?.defaultTaxRate ?? 30,
+    inflationRate: assum.inflationRate,
+    taxRate:       assum.taxRate,
     monteCarlo: { enabled: true, numSimulations: 500, standardOfLivingMonthly: 7000 },
     eventOverrides: [],
     resultsStale: false,
@@ -1462,6 +1535,14 @@ registerV1Workflow({
       render: qsfRenderQTopics,
       onContinue: (wf) => qsfAdvanceQ(wf, 'q-topics', null, null),
       previousStepKey: 'choose-path',
+    },
+    'q-assumptions': {
+      key: 'q-assumptions',
+      title: 'Default assumptions',
+      render: qsfRenderQAssumptions,
+      onContinue: (wf) => qsfAdvanceQ(wf, 'q-assumptions', 'assumptions',
+        () => qsfCaptureAssumptions()),
+      previousStepKey: (wf) => qsfPrevQStep(wf, 'q-assumptions'),
     },
     'q-income': {
       key: 'q-income',
