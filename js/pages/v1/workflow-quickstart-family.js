@@ -1430,10 +1430,11 @@ registerV1Workflow({
       render: qsfRenderChoosePath,
       onContinue: (wf) => {
         const path = wf.draftData.path;
-        if (path !== 'sample' && path !== 'scratch') {
+        if (path !== 'sample' && path !== 'scratch' && path !== 'questionnaire') {
           return { ok: false, errors: ['Pick an option to continue.'] };
         }
         if (path === 'sample') return { ok: true, nextStepKey: 'pick-sample' };
+        if (path === 'questionnaire') return { ok: true, nextStepKey: 'q-topics' };
         // 'scratch' — generate an empty baseline + event set + config
         // and jump straight to Review. Idempotent.
         qsfGenerateScratchRecords(wf);
