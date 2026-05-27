@@ -50,6 +50,7 @@ The first screen you'll see in FinTom is the **Get Started** page — a workflow
 
 - **20-year basic outlook** — Project your household's net worth over 20 years. Three ways to build the plan: start from a sample scenario, start from scratch, or answer a guided questionnaire. Review your records, run the forecast with Monte Carlo, and see a one-page summary. Estimated time: about 5 minutes.
 - **12-month plan** — A near-term, month-by-month view of your finances. Same three entry paths (sample, scratch, questionnaire). The Review step lets you tweak the assumptions (inflation, tax, Monte Carlo) and override **any individual month's** amount inline — e.g. drop March's grocery bill from $1,100 to $850 without changing the other 11 months. The summary focuses on cash flow over the year and includes a per-month appendix table with starting NW, income, expenses, net cash flow, and ending NW for every month. Estimated time: 5–10 minutes.
+- **Build or edit a scenario** — Design a reusable scenario you can load into the other workflows later. Pick **Build** to create a new one from scratch or via the guided questionnaire, or **Edit** to tweak a scenario you saved earlier. The Review step lets you customise records and assumptions; clicking **Save Scenario** finishes the workflow. Saved scenarios appear under a **My built scenarios** section on the 20-year and 12-month workflows' starting-scenario step — picking one clones it into that run, so your edits don't affect the saved master. Estimated time: about 5 minutes.
 
 ### Saving your work
 

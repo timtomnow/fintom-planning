@@ -57,6 +57,18 @@ function qsfSelectSample(workflowId, sampleId) {
   const wf = getV1WorkflowInstance(workflowId);
   if (!wf) return;
   wf.draftData.sampleId = sampleId;
+  // Mutually exclusive with a built scenario selection.
+  wf.draftData.builtScenarioId = null;
+  wf.updatedAt = new Date().toISOString();
+  saveData();
+  navigate('v1-workflow', { workflowId });
+}
+
+function qsfSelectBuiltScenario(workflowId, configId) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  wf.draftData.builtScenarioId = configId;
+  wf.draftData.sampleId = null;
   wf.updatedAt = new Date().toISOString();
   saveData();
   navigate('v1-workflow', { workflowId });
@@ -140,6 +152,29 @@ function qsfGenerateSampleRecords(wf) {
     takenEventSetNames: state.data.eventSets.map(s => s.name),
   });
   qsfCommitRecords(wf, { baseline, events, eventSet, configName: '20-Year Family Plan' });
+}
+
+// Clones a user's built scenario (saved by the build-edit-scenario
+// workflow) into fresh records for this run, then attaches a 20-year
+// analysis config inheriting inflation + tax from the source.
+function qsfGenerateBuiltScenarioRecords(wf) {
+  if (wf.producedRecordIds.baselineIds.length > 0) return;
+  const cloned = cloneBuiltScenarioFromConfig(wf.draftData.builtScenarioId, {
+    takenBaselineNames: state.data.baselines.map(b => b.name),
+    takenEventSetNames: state.data.eventSets.map(s => s.name),
+    namePrefix: '20-Year',
+  });
+  if (!cloned) { showToast('Built scenario not found', 'error'); return; }
+  qsfCommitRecords(wf, {
+    baseline: cloned.baseline,
+    events:   cloned.events,
+    eventSet: cloned.eventSet,
+    configName: `20-Year Plan from ${cloned.baseline.name}`,
+    monteCarlo: {
+      inflationRate: cloned.assumptions.inflationRate,
+      taxRate:       cloned.assumptions.taxRate,
+    },
+  });
 }
 
 function qsfGenerateScratchRecords(wf) {
@@ -404,21 +439,46 @@ function qsfRenderChoosePath(wf) {
 }
 
 function qsfRenderPickSample(wf) {
-  const sel = wf.draftData.sampleId;
+  const selSample = wf.draftData.sampleId;
+  const selBuilt  = wf.draftData.builtScenarioId;
   const sample = getV1SampleDefinition(QSF_SAMPLE_ID);
-  if (!sample) return `<p style="color:var(--danger)">Sample missing.</p>`;
-  return `
-    <p>Choose a sample scenario to start from. You'll be able to review and edit every record on the next step.</p>
-    <div class="v1-card-grid" style="margin-top:20px">
-      <div class="v1-option-card${sel === sample.id ? ' selected' : ''}" onclick="qsfSelectSample('${esc(wf.id)}','${esc(sample.id)}')">
+  const builtScenarios = listBuiltScenarios();
+
+  const sampleSection = sample ? `
+    <div class="v1-section-subtitle">Sample scenarios</div>
+    <div class="v1-card-grid">
+      <div class="v1-option-card${selSample === sample.id ? ' selected' : ''}" onclick="qsfSelectSample('${esc(wf.id)}','${esc(sample.id)}')">
         <div class="v1-option-icon">${esc(sample.icon || '✨')}</div>
         <div class="v1-option-body">
           <div class="v1-option-title">${esc(sample.label)}</div>
           <div class="v1-option-desc">${esc(sample.description)}</div>
         </div>
-        <div class="v1-option-check">${sel === sample.id ? '✓' : ''}</div>
+        <div class="v1-option-check">${selSample === sample.id ? '✓' : ''}</div>
       </div>
     </div>
+  ` : '';
+
+  const builtSection = builtScenarios.length ? `
+    <div class="v1-section-subtitle" style="margin-top:24px">My built scenarios</div>
+    <p class="v1-section-hint">Scenarios you've saved via the <em>Build or edit a scenario</em> workflow. Selecting one clones it into this run, so your edits here won't affect the saved scenario.</p>
+    <div class="v1-card-grid">
+      ${builtScenarios.map(s => `
+        <div class="v1-option-card${selBuilt === s.configId ? ' selected' : ''}" onclick="qsfSelectBuiltScenario('${esc(wf.id)}','${esc(s.configId)}')">
+          <div class="v1-option-icon">🗂️</div>
+          <div class="v1-option-body">
+            <div class="v1-option-title">${esc(s.name)}</div>
+            <div class="v1-option-desc">Baseline: ${esc(s.baselineName)} · saved ${esc(new Date(s.completedAt).toLocaleDateString())}</div>
+          </div>
+          <div class="v1-option-check">${selBuilt === s.configId ? '✓' : ''}</div>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
+
+  return `
+    <p>Choose a starting scenario. You'll be able to review and edit every record on the next step.</p>
+    ${sampleSection}
+    ${builtSection}
   `;
 }
 
@@ -675,14 +735,18 @@ registerV1Workflow({
     },
     'pick-sample': {
       key: 'pick-sample',
-      title: 'Pick a sample scenario',
+      title: 'Pick a starting scenario',
       render: qsfRenderPickSample,
       onContinue: (wf) => {
-        if (!wf.draftData.sampleId) {
-          return { ok: false, errors: ['Pick a sample to continue.'] };
+        if (wf.draftData.builtScenarioId) {
+          qsfGenerateBuiltScenarioRecords(wf);
+          return { ok: true, nextStepKey: 'review' };
         }
-        qsfGenerateSampleRecords(wf);
-        return { ok: true, nextStepKey: 'review' };
+        if (wf.draftData.sampleId) {
+          qsfGenerateSampleRecords(wf);
+          return { ok: true, nextStepKey: 'review' };
+        }
+        return { ok: false, errors: ['Pick a scenario to continue.'] };
       },
       previousStepKey: 'choose-path',
     },

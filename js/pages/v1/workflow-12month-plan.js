@@ -58,6 +58,18 @@ function t12SelectSample(workflowId, sampleId) {
   const wf = getV1WorkflowInstance(workflowId);
   if (!wf) return;
   wf.draftData.sampleId = sampleId;
+  // Mutually exclusive with a built scenario selection.
+  wf.draftData.builtScenarioId = null;
+  wf.updatedAt = new Date().toISOString();
+  saveData();
+  navigate('v1-workflow', { workflowId });
+}
+
+function t12SelectBuiltScenario(workflowId, configId) {
+  const wf = getV1WorkflowInstance(workflowId);
+  if (!wf) return;
+  wf.draftData.builtScenarioId = configId;
+  wf.draftData.sampleId = null;
   wf.updatedAt = new Date().toISOString();
   saveData();
   navigate('v1-workflow', { workflowId });
@@ -253,6 +265,30 @@ function t12GenerateSampleRecords(wf) {
     namePrefix: '12-Month',
   });
   t12CommitRecords(wf, { baseline, events, eventSet, configName: '12-Month Family Plan' });
+}
+
+// Clones a user's built scenario into fresh records for this run,
+// then attaches a 12-month analysis config inheriting inflation +
+// tax from the source. MC settings stay at the 12-month defaults
+// (off) — the Review step's assumptions block lets the user enable.
+function t12GenerateBuiltScenarioRecords(wf) {
+  if (wf.producedRecordIds.baselineIds.length > 0) return;
+  const cloned = cloneBuiltScenarioFromConfig(wf.draftData.builtScenarioId, {
+    takenBaselineNames: state.data.baselines.map(b => b.name),
+    takenEventSetNames: state.data.eventSets.map(s => s.name),
+    namePrefix: '12-Month',
+  });
+  if (!cloned) { showToast('Built scenario not found', 'error'); return; }
+  t12CommitRecords(wf, {
+    baseline: cloned.baseline,
+    events:   cloned.events,
+    eventSet: cloned.eventSet,
+    configName: `12-Month Plan from ${cloned.baseline.name}`,
+    monteCarlo: {
+      inflationRate: cloned.assumptions.inflationRate,
+      taxRate:       cloned.assumptions.taxRate,
+    },
+  });
 }
 
 function t12GenerateScratchRecords(wf) {
@@ -528,21 +564,46 @@ function t12RenderChoosePath(wf) {
 }
 
 function t12RenderPickSample(wf) {
-  const sel = wf.draftData.sampleId;
+  const selSample = wf.draftData.sampleId;
+  const selBuilt  = wf.draftData.builtScenarioId;
   const sample = getV1SampleDefinition(T12_SAMPLE_ID);
-  if (!sample) return `<p style="color:var(--danger)">Sample missing.</p>`;
-  return `
-    <p>Choose a sample scenario to start from. You'll be able to review and edit every record on the next step.</p>
-    <div class="v1-card-grid" style="margin-top:20px">
-      <div class="v1-option-card${sel === sample.id ? ' selected' : ''}" onclick="t12SelectSample('${esc(wf.id)}','${esc(sample.id)}')">
+  const builtScenarios = listBuiltScenarios();
+
+  const sampleSection = sample ? `
+    <div class="v1-section-subtitle">Sample scenarios</div>
+    <div class="v1-card-grid">
+      <div class="v1-option-card${selSample === sample.id ? ' selected' : ''}" onclick="t12SelectSample('${esc(wf.id)}','${esc(sample.id)}')">
         <div class="v1-option-icon">${esc(sample.icon || '✨')}</div>
         <div class="v1-option-body">
           <div class="v1-option-title">${esc(sample.label)}</div>
           <div class="v1-option-desc">${esc(sample.description)}</div>
         </div>
-        <div class="v1-option-check">${sel === sample.id ? '✓' : ''}</div>
+        <div class="v1-option-check">${selSample === sample.id ? '✓' : ''}</div>
       </div>
     </div>
+  ` : '';
+
+  const builtSection = builtScenarios.length ? `
+    <div class="v1-section-subtitle" style="margin-top:24px">My built scenarios</div>
+    <p class="v1-section-hint">Scenarios you've saved via the <em>Build or edit a scenario</em> workflow. Selecting one clones it into this run, so your edits here won't affect the saved scenario.</p>
+    <div class="v1-card-grid">
+      ${builtScenarios.map(s => `
+        <div class="v1-option-card${selBuilt === s.configId ? ' selected' : ''}" onclick="t12SelectBuiltScenario('${esc(wf.id)}','${esc(s.configId)}')">
+          <div class="v1-option-icon">🗂️</div>
+          <div class="v1-option-body">
+            <div class="v1-option-title">${esc(s.name)}</div>
+            <div class="v1-option-desc">Baseline: ${esc(s.baselineName)} · saved ${esc(new Date(s.completedAt).toLocaleDateString())}</div>
+          </div>
+          <div class="v1-option-check">${selBuilt === s.configId ? '✓' : ''}</div>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
+
+  return `
+    <p>Choose a starting scenario. You'll be able to review and edit every record on the next step.</p>
+    ${sampleSection}
+    ${builtSection}
   `;
 }
 
@@ -935,14 +996,18 @@ registerV1Workflow({
     },
     'pick-sample': {
       key: 'pick-sample',
-      title: 'Pick a sample scenario',
+      title: 'Pick a starting scenario',
       render: t12RenderPickSample,
       onContinue: (wf) => {
-        if (!wf.draftData.sampleId) {
-          return { ok: false, errors: ['Pick a sample to continue.'] };
+        if (wf.draftData.builtScenarioId) {
+          t12GenerateBuiltScenarioRecords(wf);
+          return { ok: true, nextStepKey: 'review' };
         }
-        t12GenerateSampleRecords(wf);
-        return { ok: true, nextStepKey: 'review' };
+        if (wf.draftData.sampleId) {
+          t12GenerateSampleRecords(wf);
+          return { ok: true, nextStepKey: 'review' };
+        }
+        return { ok: false, errors: ['Pick a scenario to continue.'] };
       },
       previousStepKey: 'choose-path',
     },

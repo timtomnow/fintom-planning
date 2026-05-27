@@ -28,6 +28,7 @@ This is a self-contained, single-page financial planning app. No framework, no b
 | `js/pages/v1/workflows.js` | V1_WORKFLOWS registry, registerV1Workflow, getV1WorkflowInstance/Definition, lifecycle (startV1Workflow, resumeV1Workflow, advanceV1Workflow, goBackV1Workflow, exitV1Workflow, discardV1Workflow, deleteV1WorkflowRecord, rollbackProducedRecords), renderV1Workflow. Also registers the `demo-2step` admin workflow. |
 | `js/pages/v1/workflow-quickstart-family.js` | `quickstart-family` workflow ("20-year basic outlook"). Branches across `sample`/`scratch`/`questionnaire` paths, consumes the shared `family-mortgage` sample and the `household-v1` questionnaire, attaches a 20-year analysis config, runs forecast, builds a 20-year-focused summary. `qsf*` prefix on helpers is historical. |
 | `js/pages/v1/workflow-12month-plan.js` | `twelve-month-plan` workflow ("12-month plan"). Same path-branching surface as the 20-year workflow (also consumes the shared sample + questionnaire), but generates a 12-month analysis config and renders a Review step with (1) an inline **assumptions** block (inflation, tax, Monte Carlo toggle + sim count) wired to onchange handlers that mutate the analysis config, and (2) a **per-month events editor** that renders one section per month listing every event firing that month with an editable amount — saving creates a monthly override in `cfg.eventOverrides` (`monthly-${sourceId}-${month}` id). Summary is framed around the next 12 months and includes a per-month appendix table (Starting NW, Income, Expenses, Transfers, Net Cash Flow, Δ NW, Ending NW + totals row). `t12*` prefix on helpers. |
+| `js/pages/v1/workflow-build-edit-scenario.js` | `build-edit-scenario` workflow ("Build or edit a scenario"). Foundational workflow that produces reusable "built scenarios" the other workflows can load. **Build mode** branches into scratch / questionnaire (no sample option) and produces a baseline + events + event set + lightweight analysis config carrying the assumptions. **Edit mode** lets the user pick an existing built scenario and modify it in place — no records are generated, edits flow straight through the legacy modals. Terminal CTA is **Save Scenario** which marks the workflow complete and returns to Get Started. Exports two globals consumed by the other workflows: `listBuiltScenarios()` (returns `{ workflowId, configId, baselineId, eventSetId, name, baselineName, completedAt }[]` for every completed Build run whose records still exist) and `cloneBuiltScenarioFromConfig(configId, ctx)` (pure deep-clone helper returning `{ baseline, events, eventSet, assumptions }`). `bes*` prefix on helpers. |
 | `js/pages/v1/get-started.js` | renderV1GetStarted, listV1Workflows, renderWorkflowCard, renderResumeCard, renderEmptyStateCards. |
 | `js/pages/v1/history.js` | renderV1History, renderHistoryCard. |
 | `README.md` | End-user instructions (Markdown). |
@@ -42,6 +43,7 @@ js/pages/v1/shell.js → js/pages/v1/summary-components.js →
 js/pages/v1/v1-samples.js → js/pages/v1/v1-questionnaires.js →
 js/pages/v1/workflows.js →
 js/pages/v1/workflow-quickstart-family.js → js/pages/v1/workflow-12month-plan.js →
+js/pages/v1/workflow-build-edit-scenario.js →
 js/pages/v1/get-started.js → js/pages/v1/history.js
 ```
 
@@ -708,6 +710,34 @@ The `review` step is shared across all three paths: scenario-name input at the t
 
 The summary step also handles a **stale-cache fallback**: if `state.lastRun` is missing or doesn't match the workflow's analysis config (e.g. user resumed from History after a browser refresh), the render returns a "Re-running analysis…" placeholder and schedules `qsfRunForecastAndAdvance(wf, null)` to repopulate the cache + re-render. This is what makes History entries clickable — they reopen at the summary step and the cache fills itself.
 
+### Built scenarios (cross-workflow concept)
+
+A "built scenario" is the persistent output of a completed `build-edit-scenario` workflow run: a baseline + events + event set + a lightweight analysis config carrying the assumptions (inflation, tax, Monte Carlo). They live in the same `state.data.{baselines, events, eventSets, analysisConfigs}` arrays as everything else — there's no separate table. What identifies them as "built scenarios" is the workflow that produced them.
+
+`workflow-build-edit-scenario.js` exposes two globals used by every consumer workflow:
+
+```js
+listBuiltScenarios() -> [{ workflowId, configId, baselineId, eventSetId, name, baselineName, completedAt }]
+// Filter: state.data.workflows where type === 'build-edit-scenario'
+// AND completedAt AND producedRecordIds.analysisConfigIds[0] still exists.
+// Edit-mode runs are excluded (they don't produce records).
+// Sorted newest first by completedAt.
+
+cloneBuiltScenarioFromConfig(sourceConfigId, ctx) -> { baseline, events, eventSet, assumptions } | null
+// Deep-clones the baseline (new uuid + new asset/liability uuids),
+// the events (new uuids), and the event set (new uuid, name suffix
+// applied via ctx.namePrefix). Returns the source's inflation +
+// tax rates in `assumptions` so the caller can carry them into its
+// own analysis config. Pure — caller commits.
+// ctx = { takenBaselineNames, takenEventSetNames, namePrefix? }
+```
+
+Each consumer workflow's `pick-sample` step renders two sub-sections: the built-in **Sample scenarios** card grid, and below it a **My built scenarios** card grid populated from `listBuiltScenarios()`. Selection state is split across two mutually-exclusive `draftData` fields:
+- `wf.draftData.sampleId` — id of the selected built-in sample
+- `wf.draftData.builtScenarioId` — id of the selected built scenario's analysis config
+
+Picking one clears the other. On Continue, the workflow's `onContinue` checks `builtScenarioId` first and calls `qsfGenerateBuiltScenarioRecords` / `t12GenerateBuiltScenarioRecords` (which wrap `cloneBuiltScenarioFromConfig` and then the workflow's existing `commitRecords` helper); else it falls back to the sample path.
+
 ### 12-month plan workflow
 
 `js/pages/v1/workflow-12month-plan.js` registers `id: 'twelve-month-plan'`. The branching surface (`choose-path` + `pick-sample` + `q-*`) is structurally identical to the 20-year workflow and consumes the same shared sample (`family-mortgage`) and questionnaire (`household-v1`) — see the `t12*` helpers and the `T12_QUESTIONNAIRE_ID` / `T12_SAMPLE_ID` constants. Two pieces are deliberately different:
@@ -725,6 +755,26 @@ The summary step also handles a **stale-cache fallback**: if `state.lastRun` is 
 - **Appendix table** (`data-table` component): one row per month with **Starting NW · Income · Expenses · Transfers · Net Cash Flow · Δ NW · Ending NW**, plus a totals row at the bottom.
 
 `t12RunForecastAndAdvance`, `t12HasFreshRun`, the stale-cache fallback in `t12RenderSummary`, and the `confirm-run` page are direct analogues of the `qsf*` versions. Defaults: `viewMode: 'monthly'`, `monteCarlo.enabled: false` (off by default since 12-month percentile fans are narrow), `monteCarlo.numSimulations: 200`.
+
+### Build or edit a scenario workflow
+
+`js/pages/v1/workflow-build-edit-scenario.js` registers `id: 'build-edit-scenario'`. It does **not** run a forecast or generate a summary — its terminal step (`review`) finishes the workflow with the "Save Scenario" CTA and returns the user to Get Started. The records it produces become first-class **built scenarios** (see § Built scenarios above) consumed by the 20-year and 12-month workflows.
+
+Step machine — branching on `wf.draftData.mode`:
+
+- **Build mode** sequence:  `choose-mode` → `choose-path` → `[q-topics, …selected q-* steps]` (questionnaire only) → `review`.
+- **Edit mode** sequence:   `choose-mode` → `pick-scenario` → `review`.
+
+`choose-path` here intentionally omits the "Use a sample scenario" option from the 20-year/12-month workflows — only **Start from scratch** and **Guided questionnaire** are offered (since picking a sample wouldn't add value to a workflow whose purpose is to author scenarios). The Edit-mode `pick-scenario` step lists everything returned by `listBuiltScenarios()`; selecting one sets `wf.draftData.editingConfigId` and the Review step resolves records via `besResolveScenarioRecords(wf)` (which dispatches: in Edit mode, returns the existing scenario's records; in Build mode, returns the records the workflow generated).
+
+Review step (`besRenderReview`) shares the same Assets / Liabilities / Events structure as the other workflows' Reviews, with the 12-month workflow's **Assumptions block** layered on top (`besRenderAssumptionsBlock`). The Continue button is labeled **Save Scenario** via `continueLabel: 'Save Scenario'`; its `onContinue` returns `{ ok: true, nextStepKey: 'complete' }`, which the runtime turns into a "workflow complete" navigation back to `V1_LANDING_PAGE`.
+
+Discard semantics:
+- **Build mode in progress** — records exist in state.data but the user hasn't saved. `discardV1Workflow` rolls back via `producedRecordIds`. Standard.
+- **Build mode completed** — appears in History; only `deleteV1WorkflowRecord` is available, which removes the workflow instance but keeps the records (so the built scenario survives).
+- **Edit mode in progress / completed** — `producedRecordIds` is empty (no new records were generated); rollback is a no-op. Edits persist (they were saved through the legacy modals as the user typed). Discard / delete only removes the workflow instance.
+
+If the user deletes a built scenario's baseline / event set via the legacy Analysis page after the fact, `listBuiltScenarios()` filters out the now-orphaned workflow instance automatically (the `if (!cfg || !bl)` guards). Consumer workflows whose users had selected the now-deleted scenario will fail with a friendly toast in `cloneBuiltScenarioFromConfig` (returns `null`).
 
 ---
 

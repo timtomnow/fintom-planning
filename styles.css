@@ -778,6 +778,21 @@ body.v1-mode #toast-container { top: 70px; }
 
 .v1-section-muted { opacity: 0.92; }
 
+.v1-section-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 0 0 10px 0;
+}
+.v1-section-hint {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.55;
+  margin: -4px 0 12px 0;
+}
+
 .v1-card-grid { display: flex; flex-direction: column; gap: 10px; }
 
 .v1-card {
