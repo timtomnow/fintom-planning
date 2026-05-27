@@ -27,6 +27,12 @@
 //       A list of label/value pairs grouped under a heading.
 //       Useful for "Scenario inputs", "Records used", etc.
 //
+//   { type: 'data-table', title?: 'string', columns: [string],
+//     rows: [[cell, cell, ...]], align?: ['left'|'right'|'center'] }
+//       A multi-column tabular report. `align` is per-column; defaults
+//       to 'left' for the first column and 'right' for the rest.
+//       Use for monthly appendices, per-account breakdowns, etc.
+//
 // Same component list is consumed by both screen render and PDF
 // report generation (via window.print), so anything you add here
 // works in both places for free.
@@ -47,6 +53,7 @@ function renderSummaryComponent(c) {
     case 'kpi-grid':     return renderSC_KpiGrid(c);
     case 'chart':        return renderSC_Chart(c);
     case 'data-section': return renderSC_DataSection(c);
+    case 'data-table':   return renderSC_DataTable(c);
     default:
       return `<div class="v1-summary-component v1-summary-unknown">Unknown component: ${esc(c.type)}</div>`;
   }
@@ -78,6 +85,28 @@ function renderSC_Chart(c) {
       ${c.title ? `<h3 class="v1-summary-chart-title">${esc(c.title)}</h3>` : ''}
       <div class="v1-summary-chart-canvas-wrap" style="height:${Number(height)}px">
         <canvas id="${esc(c.id)}"></canvas>
+      </div>
+    </div>
+  `;
+}
+
+function renderSC_DataTable(c) {
+  const columns = c.columns ?? [];
+  const rows    = c.rows ?? [];
+  const align   = (i) => {
+    if (Array.isArray(c.align) && c.align[i]) return c.align[i];
+    return i === 0 ? 'left' : 'right';
+  };
+  return `
+    <div class="v1-summary-component v1-summary-data-table">
+      ${c.title ? `<h3 class="v1-summary-data-title">${esc(c.title)}</h3>` : ''}
+      <div class="v1-summary-data-table-wrap">
+        <table class="v1-summary-table">
+          <thead><tr>${columns.map((col, i) => `<th style="text-align:${align(i)}">${esc(col)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${rows.map(r => `<tr>${r.map((cell, i) => `<td style="text-align:${align(i)}">${esc(cell ?? '')}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
       </div>
     </div>
   `;

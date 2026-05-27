@@ -48,7 +48,8 @@ The first screen you'll see in FinTom is the **Get Started** page — a workflow
 
 ### Available workflows
 
-- **Quick-start: Family with mortgage** — Generates a realistic two-income household scenario with a primary residence, an amortizing mortgage, mixed investment accounts (TFSA, RRSP), and typical monthly expenses. You review each generated record (and edit anything that doesn't fit your situation), name your scenario, run a 20-year forecast with Monte Carlo, and see a one-page summary of where your plan lands. Estimated time: about 5 minutes.
+- **20-year basic outlook** — Project your household's net worth over 20 years. Three ways to build the plan: start from a sample scenario, start from scratch, or answer a guided questionnaire. Review your records, run the forecast with Monte Carlo, and see a one-page summary. Estimated time: about 5 minutes.
+- **12-month plan** — A near-term, month-by-month view of your finances. Same three entry paths (sample, scratch, questionnaire). The Review step lets you tweak the assumptions (inflation, tax, Monte Carlo) and override **any individual month's** amount inline — e.g. drop March's grocery bill from $1,100 to $850 without changing the other 11 months. The summary focuses on cash flow over the year and includes a per-month appendix table with starting NW, income, expenses, net cash flow, and ending NW for every month. Estimated time: 5–10 minutes.
 
 ### Saving your work
 

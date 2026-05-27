@@ -22,9 +22,12 @@ This is a self-contained, single-page financial planning app. No framework, no b
 | `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, _cmpEvTableData, renderEventsTableSection, etc.), tab state (_resultsTab, _brSelectedItem, _brChart, _overviewScenario, _evTableScenario) + functions (switchResultsTab, switchOverviewScenario, switchEvTableScenario, renderBalanceReviewContent, attachBalanceReviewChart, onBrItemChange, renderBaselineValuesContent, renderAnalysisConfigContent), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt, updateBaselineCmpValuesAt. |
 | `js/pages/settings.js` | renderSettings, saveSettings, confirmClear. |
 | `js/pages/v1/shell.js` | renderV1Shell — sticky topbar + actionbar chrome wrapped around every workflow step body. |
-| `js/pages/v1/summary-components.js` | renderSummaryComponents, renderSC_* (per component type), attachSummaryCharts, generateSummaryReport. Reusable summary primitives shared across workflows. |
+| `js/pages/v1/summary-components.js` | renderSummaryComponents, renderSC_* (per component type incl. `data-table`), attachSummaryCharts, generateSummaryReport. Reusable summary primitives shared across workflows. |
+| `js/pages/v1/v1-samples.js` | Shared sample-scenario registry. `V1_SAMPLES`, `registerV1Sample`, `getV1SampleDefinition`, `listV1Samples`. Currently hosts the `family-mortgage` sample. Workflows consume samples by id; the sample's `generate(ctx)` returns `{ baseline, events, eventSet }` and the workflow attaches its own analysis config. |
+| `js/pages/v1/v1-questionnaires.js` | Shared questionnaire registry. `V1_QUESTIONNAIRES`, `registerV1Questionnaire`, `getV1QuestionnaireDefinition`. Currently hosts `household-v1`. Owns topics, per-topic renders/captures/defaults, and `generate(answers, ctx)` → `{ baseline, events, eventSet }`. Workflows consume by id, own only the step keys + the analysis config, and call into `renders[topic]` / `captures[topic]` from their step lifecycle. |
 | `js/pages/v1/workflows.js` | V1_WORKFLOWS registry, registerV1Workflow, getV1WorkflowInstance/Definition, lifecycle (startV1Workflow, resumeV1Workflow, advanceV1Workflow, goBackV1Workflow, exitV1Workflow, discardV1Workflow, deleteV1WorkflowRecord, rollbackProducedRecords), renderV1Workflow. Also registers the `demo-2step` admin workflow. |
-| `js/pages/v1/workflow-quickstart-family.js` | quickstart-family workflow (5 steps): qsfSelectPath, qsfSelectSample, qsfRenameScenario, qsfGenerateRecords, qsfRunForecastAndAdvance, qsfBuildSummaryComponents, qsfAttachSummary, qsfGenerateReport, and the render*/attach* per-step functions. |
+| `js/pages/v1/workflow-quickstart-family.js` | `quickstart-family` workflow ("20-year basic outlook"). Branches across `sample`/`scratch`/`questionnaire` paths, consumes the shared `family-mortgage` sample and the `household-v1` questionnaire, attaches a 20-year analysis config, runs forecast, builds a 20-year-focused summary. `qsf*` prefix on helpers is historical. |
+| `js/pages/v1/workflow-12month-plan.js` | `twelve-month-plan` workflow ("12-month plan"). Same path-branching surface as the 20-year workflow (also consumes the shared sample + questionnaire), but generates a 12-month analysis config and renders a Review step with (1) an inline **assumptions** block (inflation, tax, Monte Carlo toggle + sim count) wired to onchange handlers that mutate the analysis config, and (2) a **per-month events editor** that renders one section per month listing every event firing that month with an editable amount — saving creates a monthly override in `cfg.eventOverrides` (`monthly-${sourceId}-${month}` id). Summary is framed around the next 12 months and includes a per-month appendix table (Starting NW, Income, Expenses, Transfers, Net Cash Flow, Δ NW, Ending NW + totals row). `t12*` prefix on helpers. |
 | `js/pages/v1/get-started.js` | renderV1GetStarted, listV1Workflows, renderWorkflowCard, renderResumeCard, renderEmptyStateCards. |
 | `js/pages/v1/history.js` | renderV1History, renderHistoryCard. |
 | `README.md` | End-user instructions (Markdown). |
@@ -35,9 +38,14 @@ This is a self-contained, single-page financial planning app. No framework, no b
 js/utils.js → js/data.js → js/engine.js → js/ui.js →
 js/pages/dashboard.js → js/pages/baselines.js → js/pages/events.js →
 js/pages/inputs.js → js/pages/analysis.js → js/pages/results.js → js/pages/settings.js →
-js/pages/v1/shell.js → js/pages/v1/summary-components.js → js/pages/v1/workflows.js →
-js/pages/v1/workflow-quickstart-family.js → js/pages/v1/get-started.js → js/pages/v1/history.js
+js/pages/v1/shell.js → js/pages/v1/summary-components.js →
+js/pages/v1/v1-samples.js → js/pages/v1/v1-questionnaires.js →
+js/pages/v1/workflows.js →
+js/pages/v1/workflow-quickstart-family.js → js/pages/v1/workflow-12month-plan.js →
+js/pages/v1/get-started.js → js/pages/v1/history.js
 ```
+
+`v1-samples.js` and `v1-questionnaires.js` are pure registries — they self-register their definitions at load time and expose `getV1*Definition(id)` lookups. They must load before any workflow file that consumes them. Workflow files load in any order relative to each other since they each independently call `registerV1Workflow(...)`.
 
 All files use global scope (no ES modules). Order enforces dependencies. `file://` compatible.
 
@@ -604,6 +612,7 @@ Component types (in `js/pages/v1/summary-components.js`):
 | `kpi-grid`     | `{ type, items: [{ label, value, sublabel? }] }` | Auto-fitting row of stat cards. |
 | `chart`        | `{ type, id, title?, config, height? }` | `id` must be unique on the page; `config` is a Chart.js config passed straight to `makeChart`. |
 | `data-section` | `{ type, title, rows: [{ label, value }] }` | Label/value list under a heading. Useful for "Scenario inputs", "Records used", etc. |
+| `data-table`   | `{ type, title?, columns: string[], rows: cell[][], align?: ('left'\|'right'\|'center')[] }` | Multi-column tabular report. `align` is per-column (defaults to left for col 0, right for the rest). Cells are passed through `esc()`. Used for the 12-month workflow's per-month appendix. |
 
 API:
 
@@ -636,27 +645,86 @@ A summary step that calls `generateSummaryReport(title)` triggers a temporary CS
 
 The browser's print dialog handles the actual PDF generation via "Save as PDF" — no client-side PDF library is bundled. If we want richer / templated PDFs later, swap the implementation of `generateSummaryReport` for jsPDF; the workflow code (which just passes a `title`) stays unchanged.
 
+### Shared sample and questionnaire registries
+
+`v1-samples.js` and `v1-questionnaires.js` host workflow-agnostic generators so multiple workflows can share the same "Family with mortgage" sample and the same guided questionnaire. Both are id-keyed registries, which makes them versionable: when a sample or questionnaire's shape needs to change in a breaking way, register a new id (e.g. `family-mortgage-v2`, `household-v2`) instead of mutating the existing one. Workflows pin to a specific id via constants at the top of their file, so older completed runs and other workflows keep producing the expected records.
+
+Sample API (`v1-samples.js`):
+
+```js
+registerV1Sample({
+  id, label, description, icon,
+  generate: (ctx) => ({ baseline, events, eventSet }),
+});
+// ctx = { startDate, takenBaselineNames, takenEventSetNames, namePrefix? }
+```
+
+Questionnaire API (`v1-questionnaires.js`):
+
+```js
+registerV1Questionnaire({
+  id, version, label,
+  topics: [{ key, label, desc }],
+  recurringItems,                       // for the 'recurring' topic
+  defaults: { [topicKey]: () => answer },
+  captures: { [topicKey]: (prev) => answer },
+  renders:  { [topicKey]: (wfId, draft) => htmlString },
+  generate: (answers, ctx) => ({ baseline, events, eventSet }),
+});
+// ctx = { startDate, takenBaselineNames, takenEventSetNames,
+//         namePrefix?, baselineDescription?, eventSetDescription? }
+```
+
+Both `generate(...)` calls are **pure** — they return records but do not push into `state.data`. The workflow that calls them is responsible for persisting the result and recording produced ids for rollback. This is what lets the workflow layer its own analysis config on top (12-month horizon, 20-year horizon, MC settings, etc.) without the sample/questionnaire having to know about it.
+
+The `household-v1` questionnaire's per-topic renders rely on DOM ids prefixed `qassum-`, `qsav-`, `qhousing-`, `qrec-`, plus the css classes `.qsf-income-row`, `.qsf-onetime-row`, `.qsf-debt-row` for the multi-row capture helpers. Any future workflow that consumes `household-v1` will inherit those ids — they're internal to the questionnaire module and don't need workflow-specific prefixes.
+
 ### Adding a new workflow
 
 1. Create `js/pages/v1/workflow-<name>.js`.
-2. Define helper functions for selection handlers, record generation, and any per-step rendering or post-render hooks. Conventional naming: prefix with a short tag (e.g. `qsf` for quickstart-family) to keep globals separated.
-3. Call `registerV1Workflow({ id, title, description, icon, estimatedTime, category, eligible, initialStepKey, initialDraft, steps: { … } })` at module load.
-4. Inside record-generation, push every created ID to `wf.producedRecordIds.*` so discard rolls back cleanly.
-5. Use `uniqueName(base, takenList)` (in `js/utils.js`) when generating record names so re-running the workflow doesn't collide.
-6. If a step renders a summary, build a component list with the primitives above and use `postRender: (wf) => attachSummaryCharts(buildComponents(wf))` to attach Chart.js instances.
-7. Add a `<script src="js/pages/v1/workflow-<name>.js"></script>` tag to `index.html` between `workflows.js` and `get-started.js`.
+2. Pick a short helper prefix (e.g. `qsf` for quickstart-family, `t12` for the 12-month plan) to keep your module's globals isolated.
+3. Decide whether to reuse the shared sample (`getV1SampleDefinition(id).generate(ctx)`) and/or the shared questionnaire (`getV1QuestionnaireDefinition(id)` + its `renders`/`captures`/`generate`), or to provide bespoke generation. Most workflows should reuse — it keeps the surface consistent.
+4. Define a `commitRecords` helper that takes the `{ baseline, events, eventSet }` from the shared generator, pushes everything into `state.data`, records the ids in `wf.producedRecordIds.*` (for rollback), and attaches the workflow-specific analysis config.
+5. Call `registerV1Workflow({ id, title, description, icon, estimatedTime, category, eligible, initialStepKey, initialDraft, getStepSequence?, steps: { … } })` at module load.
+6. For branching workflows, implement `getStepSequence(wf)` to drive the topbar's "Step N of M" indicator and the `previousStepKey` lookups.
+7. Use `uniqueName(base, takenList)` (in `js/utils.js`) when generating record names so re-running the workflow doesn't collide.
+8. If a step renders a summary, build a component list with the primitives above and use `postRender: (wf) => attachSummaryCharts(buildComponents(wf))` to attach Chart.js instances.
+9. Add a `<script src="js/pages/v1/workflow-<name>.js"></script>` tag to `index.html` between the existing workflow files and `get-started.js`.
+10. Add the new file path to `CORE_ASSETS` in `sw.js` and bump `CACHE_VERSION` so installed PWA clients pick up the change.
 
-### Quick-start family workflow (reference implementation)
+### 20-year basic outlook (reference implementation)
 
-`js/pages/v1/workflow-quickstart-family.js` registers `id: 'quickstart-family'` with five steps:
+`js/pages/v1/workflow-quickstart-family.js` registers `id: 'quickstart-family'` (the historical internal id; user-facing title is **"20-year basic outlook"**). It uses 3 branching paths off the `choose-path` step:
 
-1. `choose-path` — "Use a sample scenario" vs. "Start from scratch" (disabled placeholder for a future questionnaire workflow).
-2. `pick-sample` — single sample for now ("Family with mortgage"). On Continue, calls idempotent `qsfGenerateRecords(wf)`: pushes 1 baseline (5 assets + 1 amortizing mortgage with `paymentMode: 'calculated'`, `termStartDate`, `termEndDate`, `renewalRate`), 11 recurring events (income x2, recurring expenses, two transfer events for TFSA / RRSP contributions), 1 event set, 1 analysis config (20yr horizon, MC on, 500 simulations). All names go through `uniqueName(...)` so re-running yields `Family with Mortgage Plan (2)`, `20-Year Family Plan (2)`, etc.
-3. `review` — Editable scenario-name input at top (writes to `cfg.name` on blur via `qsfRenameScenario`); Assets / Liabilities / Events sections with Edit + Delete using the legacy modals.
-4. `confirm-run` — On Continue, calls `qsfRunForecastAndAdvance(wf, 'summary')` which runs `runDeterministicForecast` synchronously, then schedules `runMonteCarloForecast` via `setTimeout` so the "Running N simulations…" toast paints first. The async callback caches results in `state.lastRun` / `state.lastRunConfig`, updates `wf.currentStep = 'summary'`, and navigates. The `onContinue` returns `{ ok: false }` so the runtime doesn't try to advance synchronously.
-5. `summary` — Builds the component list via `qsfBuildSummaryComponents(wf)`: narrative paragraph, KPI grid (current NW, projected median NW at year 20, p10–p90 range, mortgage payoff month), 20-year Chart.js line chart (deterministic line + MC bands), data-section listing scenario inputs. CTAs: **Generate Report** (calls `qsfGenerateReport(wf.id)` which passes `cfg.name` as the PDF title), **Explore full analysis** (navigates to legacy results page with the cached run).
+- **sample** → `choose-path` → `pick-sample` → `review` → `confirm-run` → `summary`. The sample is `family-mortgage` from `v1-samples.js` (5 assets + 1 amortizing mortgage with `paymentMode: 'calculated'`, `termStartDate`, `termEndDate`, `renewalRate`; 11 recurring events). On Continue from `pick-sample`, `qsfGenerateSampleRecords(wf)` calls `sample.generate(...)` then `qsfCommitRecords(...)` which attaches a 20-year analysis config (`viewMode: 'yearly'`, `monteCarlo.enabled: true`, 500 simulations). Idempotent: bails if records already exist on the workflow.
+- **scratch** → `choose-path` → `review` → `confirm-run` → `summary`. `qsfGenerateScratchRecords(wf)` builds an empty baseline + empty event set + the same 20-year analysis config. User fills in records via the + Add buttons on Review.
+- **questionnaire** → `choose-path` → `q-topics` → [N selected topic Qs] → `review` → `confirm-run` → `summary`. Steps `q-*` are rendered by thin proxies (`qsfRenderQAssumptions`, etc.) that call into `getV1QuestionnaireDefinition('household-v1').renders[topic](wfId, draft)`. On Continue, `qsfAdvanceQ(wf, currentKey, topicKey)` invokes the questionnaire's `captures[topic]` to read the DOM, stores the answer on `wf.draftData.q.<topic>`, then advances. On entry to `review`, `qsfGenerateQuestionnaireRecords(wf)` calls `qDef.generate(answers, ctx)` and commits with the inflation/tax rates from the assumptions topic.
+
+The `review` step is shared across all three paths: scenario-name input at the top (writes to `cfg.name` on blur via `qsfRenameScenario`); Assets / Liabilities / Events sections with Edit + Delete using the legacy modals. `confirm-run` and `summary` are also shared.
+
+`qsfRunForecastAndAdvance(wf, 'summary')` runs `runDeterministicForecast` synchronously, then schedules `runMonteCarloForecast` via `setTimeout` so the "Running N simulations…" toast paints first. The async callback caches results in `state.lastRun` / `state.lastRunConfig`, updates `wf.currentStep = 'summary'`, and navigates. The `onContinue` returns `{ ok: false }` so the runtime doesn't try to advance synchronously.
+
+`summary` builds the component list via `qsfBuildSummaryComponents(wf)`: narrative paragraph, KPI grid (current NW, projected median NW at year 20, p10–p90 range, mortgage payoff month), 20-year Chart.js line chart (deterministic line + MC bands), data-section listing scenario inputs. CTAs: **Generate Report** (calls `qsfGenerateReport(wf.id)` which passes `cfg.name` as the PDF title), **Explore full analysis** (navigates to legacy results page with the cached run).
 
 The summary step also handles a **stale-cache fallback**: if `state.lastRun` is missing or doesn't match the workflow's analysis config (e.g. user resumed from History after a browser refresh), the render returns a "Re-running analysis…" placeholder and schedules `qsfRunForecastAndAdvance(wf, null)` to repopulate the cache + re-render. This is what makes History entries clickable — they reopen at the summary step and the cache fills itself.
+
+### 12-month plan workflow
+
+`js/pages/v1/workflow-12month-plan.js` registers `id: 'twelve-month-plan'`. The branching surface (`choose-path` + `pick-sample` + `q-*`) is structurally identical to the 20-year workflow and consumes the same shared sample (`family-mortgage`) and questionnaire (`household-v1`) — see the `t12*` helpers and the `T12_QUESTIONNAIRE_ID` / `T12_SAMPLE_ID` constants. Two pieces are deliberately different:
+
+**1. Review step (`t12RenderReview`)** — in addition to the standard scenario-name + Assets + Liabilities + Events sections, the page renders two extra blocks:
+
+- **Assumptions block** (`t12RenderAssumptionsBlock`) — inline edits for `cfg.inflationRate`, `cfg.taxRate`, and `cfg.monteCarlo` (enabled toggle + numSimulations input). Each input wires `onchange` to a `t12Set*` handler that mutates the analysis config and saves. Toggling MC also shows/hides the sim-count input via direct DOM `style.display` (no rerender needed).
+- **Per-month events editor** (`t12RenderMonthlyEventsBlock`) — for each of the next 12 months, expands to a section listing every event firing that month (via `resolveEffectiveEvents(cfg)` + `getEventsForPeriod(month, 'monthly', events, cfg)`, then `loan_payment` synthetic entries filtered out). Each row has the event name + a positive/negative type badge + an editable amount input. `onchange` calls `t12SaveMonthOverride(workflowId, sourceId, month, value)`, which creates / updates a record in `cfg.eventOverrides` keyed `monthly-${sourceId}-${month}` with `_sourceId` + `_month` (same schema the legacy Results page uses for per-month overrides). The parent recurring event is left untouched; `resolveEffectiveEvents` uses `_excludedMonths` to suppress the original for the overridden month. A "modified" pill + Reset button appear on overridden rows. Loan payments are intentionally not editable here — they're auto-derived from the liability's amortization schedule.
+
+**2. Summary step (`t12BuildSummaryComponents`)** — the focus is the next 12 months rather than a long-horizon projection:
+
+- KPI grid: Current NW, NW at month 12, Total income (12 mo), Total expenses (12 mo), Net cash flow.
+- Chart: monthly net-worth line over 12 months (with MC bands if `cfg.monteCarlo.enabled`).
+- Data section: scenario inputs (horizon, inflation, tax, MC, event count).
+- **Appendix table** (`data-table` component): one row per month with **Starting NW · Income · Expenses · Transfers · Net Cash Flow · Δ NW · Ending NW**, plus a totals row at the bottom.
+
+`t12RunForecastAndAdvance`, `t12HasFreshRun`, the stale-cache fallback in `t12RenderSummary`, and the `confirm-run` page are direct analogues of the `qsf*` versions. Defaults: `viewMode: 'monthly'`, `monteCarlo.enabled: false` (off by default since 12-month percentile fans are narrow), `monteCarlo.numSimulations: 200`.
 
 ---
 

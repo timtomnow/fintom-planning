@@ -1152,6 +1152,147 @@ body.v1-mode #toast-container { top: 70px; }
 }
 .v1-summary-cta-row .btn { min-height: 44px; }
 
+/* ───── v1 summary: data-table component ───── */
+.v1-summary-data-table {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+.v1-summary-data-table-wrap {
+  overflow-x: auto;
+}
+.v1-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.v1-summary-table th {
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 11px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.v1-summary-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+.v1-summary-table tbody tr:last-child td {
+  border-bottom: none;
+  font-weight: 600;
+}
+
+/* ───── v1 review: hint text under a section title ───── */
+.v1-review-section-hint {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: -4px 0 12px 0;
+  line-height: 1.55;
+}
+
+/* ───── 12-month per-month editor blocks ───── */
+.t12-month-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.t12-month-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.t12-month-empty {
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.t12-month-rows {
+  display: flex;
+  flex-direction: column;
+}
+.t12-event-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.t12-event-row:last-child { border-bottom: none; }
+.t12-event-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.t12-event-name-text {
+  font-size: 13px;
+  color: var(--text);
+}
+.t12-event-type {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.t12-event-type-positive { background: rgba(16,185,129,0.12); color: #047857; }
+.t12-event-type-negative { background: rgba(239,68,68,0.10);  color: #b91c1c; }
+.t12-event-flag {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(37,99,235,0.12);
+  color: var(--accent);
+}
+.t12-event-amount {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.t12-event-amount-prefix {
+  font-size: 13px;
+  color: var(--muted);
+}
+.t12-event-amount input {
+  width: 110px;
+  font-size: 13px;
+  padding: 4px 8px;
+  text-align: right;
+}
+.t12-event-actions { flex-shrink: 0; min-width: 60px; text-align: right; }
+.t12-event-actions .btn { padding: 2px 8px; font-size: 12px; }
+
+@media (max-width: 768px) {
+  .t12-event-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .t12-event-name { flex: 1 1 100%; }
+  .t12-event-amount { flex: 1; }
+  .t12-event-amount input { width: 100%; }
+  .t12-event-actions { flex-shrink: 0; }
+}
+
 @media (max-width: 768px) {
   .v1-summary-kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .v1-kpi-value { font-size: 17px; }
@@ -1295,10 +1436,14 @@ body.v1-print-mode .v1-body { padding: 0; max-width: none; }
   .v1-shell, .v1-body { display: block; padding: 0; max-width: none; }
   .v1-step-title { font-size: 20pt; }
   .v1-summary-narrative { background: #f6f6f6; border-left-color: #888; }
-  .v1-summary-chart, .v1-summary-data-section, .v1-kpi-card {
+  .v1-summary-chart, .v1-summary-data-section, .v1-summary-data-table, .v1-kpi-card {
     border-color: #ccc; background: #fff;
     page-break-inside: avoid;
   }
   .v1-summary-component { page-break-inside: avoid; }
   .v1-summary-chart-canvas-wrap canvas { max-height: 280px; }
+  .v1-summary-table { font-size: 9.5pt; }
+  .v1-summary-table th, .v1-summary-table td { border-color: #ccc; }
+  .v1-summary-data-table { page-break-inside: auto; }
+  .v1-summary-data-table tr { page-break-inside: avoid; }
 }
