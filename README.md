@@ -39,6 +39,7 @@ Your data is saved automatically in the browser's **local storage** after every 
 - Go to **Settings → Export All Data (JSON)** and save the file somewhere safe
 - To restore: **Settings → Import Data (JSON)**
 - To move to another device: export on the old device → copy the `.json` file → import on the new device
+- For automated, scheduled backups across all your `timtomnow.github.io` apps, see the **[ttn-backup utility](../ttn-backup/)** — installable PWA that bundles every app's data into a single timestamped `.json` and writes it to disk on a calendar reminder. Restore is available right here via **Settings → Restore from ttn-backup**.
 
 ---
 

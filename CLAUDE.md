@@ -20,7 +20,7 @@ This is a self-contained, single-page financial planning app. No framework, no b
 | `js/pages/inputs.js` | renderInputs. Mobile navigation hub — three tap-to-navigate cards linking to Baselines, Events, and Event Sets. Shown via the mobile bottom nav Inputs tab; not in the desktop sidebar. |
 | `js/pages/analysis.js` | renderAnalysis, openConfigModal, toggleMCFields, deleteConfig, resolveEventSets, resolveEffectiveEvents, getEventsForPeriod, runAndView. |
 | `js/pages/results.js` | reRunAnalysis, markResultsStale, toggleEventDetail, openOverrideEventModal, onOevTypeChange, onOevRecChange, events-table state + functions (_evTableData, _cmpEvTableData, renderEventsTableSection, etc.), tab state (_resultsTab, _brSelectedItem, _brChart, _overviewScenario, _evTableScenario) + functions (switchResultsTab, switchOverviewScenario, switchEvTableScenario, renderBalanceReviewContent, attachBalanceReviewChart, onBrItemChange, renderBaselineValuesContent, renderAnalysisConfigContent), renderResults, attachResultsCharts, setViewMode, exportCSV, updateBaselineValuesAt, updateBaselineCmpValuesAt. |
-| `js/pages/settings.js` | renderSettings, saveSettings, confirmClear. |
+| `js/pages/settings.js` | renderSettings, saveSettings, confirmClear, openTtnBackupRestore (opens the cross-app ttn-backup picker). |
 | `js/pages/v1/shell.js` | renderV1Shell — sticky topbar + actionbar chrome wrapped around every workflow step body. |
 | `js/pages/v1/summary-components.js` | renderSummaryComponents, renderSC_* (per component type incl. `data-table`), attachSummaryCharts, generateSummaryReport. Reusable summary primitives shared across workflows. |
 | `js/pages/v1/v1-samples.js` | Shared sample-scenario registry. `V1_SAMPLES`, `registerV1Sample`, `getV1SampleDefinition`, `listV1Samples`. Currently hosts the `family-mortgage` sample. Workflows consume samples by id; the sample's `generate(ctx)` returns `{ baseline, events, eventSet }` and the workflow attaches its own analysis config. |
@@ -886,6 +886,30 @@ On mobile, `#main` gets `padding-bottom: calc(60px + env(safe-area-inset-bottom)
 ### Icons
 
 Four PNG files in `icons/` are required for full PWA installability — see `icons/ICONS_NEEDED.md` for exact dimensions. Chrome will not show the install prompt until at least a 192×192 icon is present. The app runs fine without them; only installability is affected.
+
+---
+
+## ttn-backup Integration
+
+FinTom is registered with the cross-app **[ttn-backup](https://timtomnow.github.io/ttn-backup/)** utility. Two pieces wire it up:
+
+1. **Adapter declaration** in `index.html` (after the SW registration block):
+   ```js
+   window.TTNBackupAdapter = {
+     appId: 'fintom-planning',
+     appName: 'FinTom Financial Planning',
+     version: 1,
+     exportData: () => state.data,
+     importData: (data) => { /* validates shape, sets state.data, saves, navigates */ },
+   };
+   ```
+   The adapter is consumed by `client.js` (loaded from the sibling `../ttn-backup/` project), which listens for postMessage requests from the utility's hidden iframe and routes them to `exportData` / `importData`.
+
+2. **Restore button** in `renderSettings()` (Data Management card) → `openTtnBackupRestore()` → `window.TTNBackup.openImport('fintom-planning')` → Shadow-DOM modal listing every bundle containing FinTom, picked one calls `importData` directly.
+
+The adapter's `importData` mirrors the validation in `triggerImport()` — it requires `baselines`, `events`, `analysisConfigs` arrays. Anything malformed throws. Successful import sets `state.data`, runs the same migrations (`eventSets`, `workflows`), clears `lastRun`/`lastRunConfig`, persists via `saveData()`, and navigates back to `V1_LANDING_PAGE`.
+
+Same-origin assumption: both apps live under `timtomnow.github.io/*`, so the utility can iframe-load FinTom and the script tag `<script src="../ttn-backup/client.js">` resolves on GitHub Pages.
 
 ---
 

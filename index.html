@@ -50,5 +50,31 @@
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
   </script>
+  <!-- ttn-backup integration: see https://timtomnow.github.io/ttn-backup/ -->
+  <script>
+    window.TTNBackupAdapter = {
+      appId: 'fintom-planning',
+      appName: 'FinTom Financial Planning',
+      version: 1,
+      exportData: () => state.data,
+      importData: (data) => {
+        if (!data || typeof data !== 'object'
+            || !Array.isArray(data.baselines)
+            || !Array.isArray(data.events)
+            || !Array.isArray(data.analysisConfigs)) {
+          throw new Error('Bundle payload missing required FinTom fields.');
+        }
+        state.data = data;
+        state.data.eventSets = state.data.eventSets ?? [];
+        state.data.workflows = state.data.workflows ?? [];
+        state.lastRun = null;
+        state.lastRunConfig = null;
+        saveData();
+        navigate(typeof V1_LANDING_PAGE === 'string' ? V1_LANDING_PAGE : 'dashboard');
+        showToast('Data restored from ttn-backup', 'success');
+      },
+    };
+  </script>
+  <script src="../ttn-backup/client.js" defer></script>
 </body>
 </html>

@@ -36,7 +36,11 @@ function renderSettings() {
       <div class="flex gap-2 flex-wrap">
         <button class="btn btn-secondary" onclick="exportData()">Export All Data (JSON)</button>
         <button class="btn btn-secondary" onclick="triggerImport()">Import Data (JSON)</button>
+        <button class="btn btn-secondary" onclick="openTtnBackupRestore()">Restore from ttn-backup</button>
         <button class="btn btn-danger" onclick="confirmClear()">Clear All Data</button>
+      </div>
+      <div class="form-hint" style="margin-top:10px">
+        <strong>ttn-backup</strong> is a separate utility app that snapshots all your TTN apps into one bundle on a schedule. <a href="../ttn-backup/" style="color:var(--accent)">Open ttn-backup →</a>
       </div>
     </div>
 
@@ -79,6 +83,14 @@ function saveSettings() {
   state.data.settings.defaultTaxRate = parseFloat(document.getElementById('s-tax').value) || 22;
   saveData();
   showToast('Settings saved', 'success');
+}
+
+function openTtnBackupRestore() {
+  if (window.TTNBackup && typeof window.TTNBackup.openImport === 'function') {
+    window.TTNBackup.openImport('fintom-planning');
+  } else {
+    showToast('ttn-backup client not loaded. Check that ../ttn-backup/ is reachable.', 'error');
+  }
 }
 
 function confirmClear() {
