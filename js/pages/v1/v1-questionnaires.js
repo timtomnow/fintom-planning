@@ -102,9 +102,19 @@ function hhv1DefaultHousing() {
     },
     own: {
       value: 0,
-      mortgageBalance: 0,
-      mortgageRate: 5.0,
-      mortgageYear: '',
+      // Mortgage mirrors the Liability "amortising loan" feature 1:1.
+      mortgage: {
+        balance: 0,
+        rate: 5.0,
+        includeInLiquidNW: false,
+        paymentMode: 'calculated',   // 'calculated' | 'set'
+        paymentFrequency: 'monthly', // 'monthly' | 'semi-monthly' | 'bi-weekly'
+        amortizationEndDate: '',     // 'YYYY-MM' — required for calculated mode
+        termStartDate: '',           // 'YYYY-MM' — optional, fixes amortization period
+        termEndDate: '',             // 'YYYY-MM' — optional, current term expiry
+        renewalRate: 0,              // % annual rate after term end
+        monthlyPayment: 0,           // used when paymentMode = 'set'
+      },
       addons: {
         propertyTax:   { included: false, amount: 500 },
         homeInsurance: { included: false, amount: 120 },
@@ -113,6 +123,27 @@ function hhv1DefaultHousing() {
         maintenance:   { included: false, amount: 200 },
       },
     },
+  };
+}
+// Reads a normalized mortgage object out of an `own` answer, tolerating
+// the legacy flat shape (mortgageBalance / mortgageRate / mortgageYear)
+// from drafts started before the mortgage fields matched the Liability feature.
+function hhv1NormalizeOwnMortgage(own) {
+  const o = own || {};
+  const m = o.mortgage || {};
+  return {
+    balance:             Number(m.balance ?? o.mortgageBalance) || 0,
+    rate:                Number(m.rate ?? o.mortgageRate ?? 5) || 0,
+    includeInLiquidNW:   m.includeInLiquidNW ?? false,
+    paymentMode:         m.paymentMode || 'calculated',
+    paymentFrequency:    m.paymentFrequency || 'monthly',
+    // Default the payoff month to 25 years (300 months) out from today,
+    // matching a typical fresh mortgage amortization.
+    amortizationEndDate: m.amortizationEndDate || o.mortgageYear || addMonths(today(), 300),
+    termStartDate:       m.termStartDate || '',
+    termEndDate:         m.termEndDate || '',
+    renewalRate:         Number(m.renewalRate) || 0,
+    monthlyPayment:      Number(m.monthlyPayment) || 0,
   };
 }
 function hhv1DefaultRecurring() {
@@ -190,10 +221,23 @@ function hhv1CaptureHousing(prev) {
       };
     }
   } else if (out.mode === 'own') {
-    out.own.value           = parseFloat(document.getElementById('qhousing-own-value')?.value) || 0;
-    out.own.mortgageBalance = parseFloat(document.getElementById('qhousing-own-mtg-balance')?.value) || 0;
-    out.own.mortgageRate    = parseFloat(document.getElementById('qhousing-own-mtg-rate')?.value) || 0;
-    out.own.mortgageYear    = document.getElementById('qhousing-own-mtg-year')?.value || '';
+    out.own.value = parseFloat(document.getElementById('qhousing-own-value')?.value) || 0;
+    out.own.mortgage = out.own.mortgage || {};
+    const m = out.own.mortgage;
+    m.balance             = parseFloat(document.getElementById('qhousing-own-mtg-balance')?.value) || 0;
+    m.rate                = parseFloat(document.getElementById('qhousing-own-mtg-rate')?.value) || 0;
+    m.includeInLiquidNW   = !!document.getElementById('qhousing-own-mtg-liquid-nw')?.checked;
+    m.paymentMode         = document.querySelector('input[name=qhousing-own-paymode]:checked')?.value || 'calculated';
+    m.paymentFrequency    = document.getElementById('qhousing-own-mtg-freq')?.value || 'monthly';
+    m.amortizationEndDate = document.getElementById('qhousing-own-mtg-amort-end')?.value || '';
+    m.termStartDate       = document.getElementById('qhousing-own-mtg-term-start')?.value || '';
+    m.termEndDate         = document.getElementById('qhousing-own-mtg-term-end')?.value || '';
+    m.renewalRate         = parseFloat(document.getElementById('qhousing-own-mtg-renewal-rate')?.value) || 0;
+    m.monthlyPayment      = parseFloat(document.getElementById('qhousing-own-mtg-pay')?.value) || 0;
+    // Drop the legacy flat keys so they don't shadow the new shape on later reads.
+    delete out.own.mortgageBalance;
+    delete out.own.mortgageRate;
+    delete out.own.mortgageYear;
     for (const k of Object.keys(out.own.addons)) {
       out.own.addons[k] = {
         included: !!document.getElementById(`qhousing-own-ck-${k}`)?.checked,
@@ -284,6 +328,15 @@ function hhv1ChangeHousingMode(workflowId, mode) {
   wf.draftData.q.housing.mode = mode;
   saveData();
   navigate('v1-workflow', { workflowId });
+}
+// Pure DOM show/hide for the mortgage payment-mode fields — no rerender,
+// so typed values are preserved. Mirrors onPayModeChange() in baselines.js.
+function hhv1ToggleOwnPayMode() {
+  const mode = document.querySelector('input[name=qhousing-own-paymode]:checked')?.value || 'calculated';
+  const calc = document.getElementById('qhousing-own-pay-calculated');
+  const set  = document.getElementById('qhousing-own-pay-set');
+  if (calc) calc.style.display = mode === 'calculated' ? '' : 'none';
+  if (set)  set.style.display  = mode === 'set' ? '' : 'none';
 }
 function hhv1ToggleTopic(workflowId) {
   const wf = getV1WorkflowInstance(workflowId);
@@ -422,6 +475,7 @@ function hhv1RenderHousing(wfId, q) {
   q.housing = q.housing || hhv1DefaultHousing();
   const h = q.housing;
   const mode = h.mode || '';
+  const m = hhv1NormalizeOwnMortgage(h.own);
 
   const renderAddon = (groupPrefix, key, label, addon) => `
     <div class="qsf-checkamount-row">
@@ -457,17 +511,78 @@ function hhv1RenderHousing(wfId, q) {
         </div>
         <div class="form-group">
           <label>Mortgage balance <span class="label-note">(0 if paid off)</span></label>
-          <input type="number" id="qhousing-own-mtg-balance" value="${Number(h.own.mortgageBalance) || 0}" min="0" step="10000">
+          <input type="number" id="qhousing-own-mtg-balance" value="${m.balance}" min="0" step="10000">
+        </div>
+      </div>
+      <div class="qsf-section-heading">Mortgage details</div>
+      <p class="qsf-hint">These match the full Amortising Loan settings. The payment is auto-deducted from your cash (or chequing account) each month — don't also add a mortgage payment as a recurring expense.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Annual interest rate %</label>
+          <input type="number" id="qhousing-own-mtg-rate" value="${m.rate}" min="0" step="0.01">
+        </div>
+        <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:8px;">
+          <label class="checkbox-label">
+            <input type="checkbox" id="qhousing-own-mtg-liquid-nw" ${m.includeInLiquidNW ? 'checked' : ''}>
+            Include in Liquid Net Worth
+          </label>
+          <div class="form-hint">Usually unchecked — your home isn't a liquid asset you'd sell to settle the debt.</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Payment mode</label>
+        <div style="display:flex;gap:24px;margin-top:4px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+            <input type="radio" name="qhousing-own-paymode" value="calculated" onchange="hhv1ToggleOwnPayMode()"
+              ${m.paymentMode === 'calculated' ? 'checked' : ''}>
+            Calculated (auto from amortization)
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+            <input type="radio" name="qhousing-own-paymode" value="set" onchange="hhv1ToggleOwnPayMode()"
+              ${m.paymentMode === 'set' ? 'checked' : ''}>
+            Set payment (fixed amount)
+          </label>
+        </div>
+      </div>
+      <div id="qhousing-own-pay-calculated" ${m.paymentMode !== 'calculated' ? 'style="display:none"' : ''}>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Payment frequency</label>
+            <select id="qhousing-own-mtg-freq">
+              <option value="monthly"${m.paymentFrequency === 'monthly' ? ' selected' : ''}>Monthly</option>
+              <option value="semi-monthly"${m.paymentFrequency === 'semi-monthly' ? ' selected' : ''}>Semi-Monthly (2×/month)</option>
+              <option value="bi-weekly"${m.paymentFrequency === 'bi-weekly' ? ' selected' : ''}>Bi-Weekly (26×/year)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Amortization end <span class="label-note">(payoff month)</span></label>
+            <input type="month" id="qhousing-own-mtg-amort-end" value="${esc(m.amortizationEndDate)}">
+            <div class="form-hint">Required — when the loan is fully paid off.</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Term start <span class="label-note">(optional)</span></label>
+          <input type="month" id="qhousing-own-mtg-term-start" value="${esc(m.termStartDate)}">
+          <div class="form-hint">When the current term started. If set, the payment is fixed for the term. Leave blank to recalculate monthly.</div>
+        </div>
+      </div>
+      <div id="qhousing-own-pay-set" ${m.paymentMode !== 'set' ? 'style="display:none"' : ''}>
+        <div class="form-group">
+          <label>Monthly payment $</label>
+          <input type="number" id="qhousing-own-mtg-pay" value="${m.monthlyPayment}" min="0" step="50">
+          <div class="form-hint">Fixed payment; the principal / interest split is still calculated each month.</div>
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Mortgage annual rate %</label>
-          <input type="number" id="qhousing-own-mtg-rate" value="${Number(h.own.mortgageRate) || 0}" min="0" step="0.05">
+          <label>Term end <span class="label-note">(optional)</span></label>
+          <input type="month" id="qhousing-own-mtg-term-end" value="${esc(m.termEndDate)}">
+          <div class="form-hint">When the current rate term expires and the mortgage renews.</div>
         </div>
         <div class="form-group">
-          <label>Mortgage payoff month</label>
-          <input type="month" id="qhousing-own-mtg-year" value="${esc(h.own.mortgageYear || '')}">
+          <label>Rate at renewal % <span class="label-note">(optional)</span></label>
+          <input type="number" id="qhousing-own-mtg-renewal-rate" value="${m.renewalRate}" min="0" step="0.01">
+          <div class="form-hint">Assumed annual rate applied after the term end.</div>
         </div>
       </div>
       <div class="qsf-section-heading">Common ownership expenses (check to include)</div>
@@ -631,22 +746,29 @@ function hhv1Generate(answers, ctx) {
   if (sav.retirement > 0)  baseline.assets.push({ id: uuid(), name: 'Retirement Account', value: sav.retirement,  category: 'Investment Account', isInvestment: true,  isLiquid: false, monthlyGrowthRate: 0,               annualMeanReturn: invReturn, annualStdDev: invStdDev });
 
   const h = q.housing ?? {};
-  if (h.mode === 'own' && (h.own?.value > 0 || h.own?.mortgageBalance > 0)) {
-    if (h.own.value > 0) {
+  if (h.mode === 'own') {
+    if (h.own?.value > 0) {
       baseline.assets.push({ id: uuid(), name: 'Primary Residence', value: h.own.value, category: 'Real Estate', isInvestment: false, isLiquid: false, monthlyGrowthRate: interestMonthly, annualMeanReturn: invReturn, annualStdDev: invStdDev });
     }
-    if (h.own.mortgageBalance > 0 && h.own.mortgageYear) {
+    const m = hhv1NormalizeOwnMortgage(h.own);
+    // Only create the liability when the payment can actually be derived:
+    // calculated mode needs an amortization end date, set mode needs a payment.
+    const mortgageReady = m.balance > 0 &&
+      (m.paymentMode === 'set' ? m.monthlyPayment > 0 : !!m.amortizationEndDate);
+    if (mortgageReady) {
       baseline.liabilities.push({
-        id: uuid(), name: 'Primary Mortgage', value: h.own.mortgageBalance, category: 'Mortgage',
-        annualInterestRate: h.own.mortgageRate || 5,
-        useAmortization: true, monthlyPayment: 0,
-        includeInLiquidNW: false,
+        id: uuid(), name: 'Primary Mortgage', value: m.balance, category: 'Mortgage',
+        annualInterestRate: m.rate || 5,
+        useAmortization: true,
+        monthlyPayment: m.monthlyPayment || 0,
+        includeInLiquidNW: m.includeInLiquidNW,
         paymentAssetName: chequingName,
-        paymentMode: 'calculated', paymentFrequency: 'monthly',
-        amortizationEndDate: h.own.mortgageYear,
-        termStartDate: start,
-        termEndDate: '',
-        renewalRate: 0,
+        paymentMode: m.paymentMode,
+        paymentFrequency: m.paymentFrequency,
+        amortizationEndDate: m.amortizationEndDate,
+        termStartDate: m.termStartDate,
+        termEndDate: m.termEndDate,
+        renewalRate: m.renewalRate,
       });
     }
   }
